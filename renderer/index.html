@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'" />
+  <title>GitMate</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- ============ 左侧导航栏 ============ -->
+    <aside id="sidebar">
+      <div class="logo">Git<span>Mate</span></div>
+      <nav id="nav">
+        <button class="nav-btn active" data-tab="changes">
+          <span class="nav-icon">✎</span><span>变更</span><span id="chg-count" class="nav-badge hidden">0</span>
+        </button>
+        <button class="nav-btn" data-tab="history">
+          <span class="nav-icon">◷</span><span>历史</span>
+        </button>
+        <button class="nav-btn" data-tab="branches">
+          <span class="nav-icon">⑂</span><span>分支</span>
+        </button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div id="repo-mini" class="repo-mini hidden">
+          <div class="repo-mini-name"></div>
+          <div class="repo-mini-branch"></div>
+        </div>
+        <button id="open-repo-btn" class="btn-ghost btn-block">＋ 打开仓库</button>
+      </div>
+    </aside>
+
+    <!-- ============ 主区域 ============ -->
+    <main id="main">
+      <header id="topbar">
+        <div id="repo-title">
+          <span id="repo-name" class="repo-name">未打开仓库</span>
+          <span id="repo-path" class="repo-path"></span>
+        </div>
+        <div id="branch-wrap" class="branch-wrap hidden">
+          <span class="branch-dot"></span><span id="branch-name"></span>
+          <span id="ab-badge" class="ab-badge hidden"></span>
+        </div>
+        <div class="top-actions">
+          <button id="pull-btn" class="btn-ghost" title="拉取远程更新">⬇ 拉取</button>
+          <button id="push-btn" class="btn-ghost" title="推送到远程">⬆ 推送</button>
+          <button id="refresh-btn" class="btn-ghost" title="刷新 (F5)">⟳</button>
+        </div>
+      </header>
+
+      <!-- ===== 变更视图 ===== -->
+      <section id="view-changes" class="view active">
+        <div class="changes-col">
+          <div class="panel changes-unstaged">
+            <div class="panel-head">
+              <span>未暂存的更改</span>
+              <span class="panel-actions">
+                <button id="stage-all-btn" class="btn-mini">全部暂存</button>
+                <button id="discard-all-btn" class="btn-mini danger">全部丢弃</button>
+              </span>
+            </div>
+            <div id="unstaged-list" class="file-list"></div>
+          </div>
+          <div class="panel changes-staged">
+            <div class="panel-head">
+              <span>已暂存</span>
+              <span class="panel-actions">
+                <button id="unstage-all-btn" class="btn-mini">全部取消暂存</button>
+              </span>
+            </div>
+            <div id="staged-list" class="file-list"></div>
+          </div>
+          <div class="panel commit-box">
+            <textarea id="commit-msg" rows="3" placeholder="提交信息（第一行写摘要，空行后写详情）…"></textarea>
+            <div class="commit-row">
+              <span id="commit-hint" class="commit-hint"></span>
+              <button id="commit-btn" class="btn-primary">✓ 提交</button>
+            </div>
+          </div>
+        </div>
+        <div class="diff-col panel">
+          <div id="diff-head" class="diff-head hidden">
+            <span id="diff-file"></span>
+            <span id="diff-area" class="tag"></span>
+          </div>
+          <div id="diff-body" class="diff-body"><div class="placeholder">选择左侧文件查看差异</div></div>
+        </div>
+      </section>
+
+      <!-- ===== 历史视图 ===== -->
+      <section id="view-history" class="view">
+        <div class="hist-col panel">
+          <div class="panel-head"><span>提交历史</span></div>
+          <div id="commit-list" class="commit-list"></div>
+        </div>
+        <div class="panel hist-detail">
+          <div id="commit-detail-head" class="commit-detail-head hidden">
+            <div id="cd-subject"></div>
+            <div id="cd-meta"></div>
+            <div id="cd-refs"></div>
+          </div>
+          <div id="cd-files" class="file-list cd-files"></div>
+          <div id="cd-diff" class="diff-body"></div>
+        </div>
+      </section>
+
+      <!-- ===== 分支视图 ===== -->
+      <section id="view-branches" class="view">
+        <div class="panel branch-col">
+          <div class="panel-head">
+            <span>本地分支</span>
+            <span class="panel-actions">
+              <input id="new-branch-name" class="input-inline" placeholder="新分支名" />
+              <button id="new-branch-btn" class="btn-mini">＋ 新建</button>
+            </span>
+          </div>
+          <div id="branch-list" class="branch-list"></div>
+        </div>
+      </section>
+
+      <!-- ===== 未打开仓库时的欢迎页 ===== -->
+      <section id="welcome" class="welcome">
+        <div class="welcome-card">
+          <div class="welcome-logo">Git<span>Mate</span></div>
+          <p>一个现代化、简单易用的 Git 桌面客户端</p>
+          <button id="welcome-open-btn" class="btn-primary btn-lg">打开一个 Git 仓库</button>
+          <div id="recent-repos" class="recent-repos"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- 右键菜单 -->
+  <div id="ctx-menu" class="ctx-menu hidden"></div>
+  <!-- 模态框 -->
+  <div id="modal-wrap" class="modal-wrap hidden">
+    <div id="modal" class="modal">
+      <div id="modal-title" class="modal-title"></div>
+      <div id="modal-body" class="modal-body"></div>
+      <div class="modal-actions">
+        <button id="modal-cancel" class="btn-ghost">取消</button>
+        <button id="modal-ok" class="btn-primary">确定</button>
+      </div>
+    </div>
+  </div>
+  <!-- Toast -->
+  <div id="toast-wrap" class="toast-wrap"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
