@@ -15,4 +15,6 @@ contextBridge.exposeInMainWorld('gitmate', {
   showInFolder: (p) => ipcRenderer.invoke('show-in-folder', p),
   // 追加到 .gitignore
   appendIgnore: (repo, entry) => ipcRenderer.invoke('append-ignore', { repo, entry }),
+  // 内嵌终端：在持久 bash 会话里执行用户手敲的命令
+  termRun: (repo, cmdline, timeout) => ipcRenderer.invoke('term-run', { repo, cmdline, timeout }),
 });

@@ -6,6 +6,7 @@
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const { spawn } = require('child_process');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 let win = null;
@@ -60,6 +61,84 @@ function runGit(repo, args, timeout = 20000) {
   });
 }
 
+// ---------- 内嵌终端：持久 Git Bash 会话 ----------
+function findBashExe() {
+  const candidates = [
+    'D:\\git\\Git\\bin\\bash.exe',   // 本机 Git Bash 安装位置
+    'C:\\Program Files\\Git\\bin\\bash.exe',
+    'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
+    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Git', 'bin', 'bash.exe'),
+  ];
+  for (const c of candidates) { try { if (fs.existsSync(c)) return c; } catch {} }
+  return null;
+}
+
+let bashProc = null;   // 当前持久会话
+let bashRepo = null;   // 会话对应的仓库目录（变更则重启会话）
+
+function ensureBash(repoPath) {
+  if (bashProc && bashRepo === repoPath) return bashProc;
+  if (bashProc) { try { bashProc.kill(); } catch {} bashProc = null; }
+  const exe = findBashExe();
+  if (!exe) return null;
+  bashProc = spawn(exe, ['--noprofile', '--norc'], {
+    cwd: repoPath || os.homedir(),
+    env: { ...process.env, TERM: 'dumb', GIT_PAGER: 'cat', PAGER: 'cat' },
+    windowsHide: true,
+  });
+  bashProc.stdin.setDefaultEncoding('utf8');
+  bashProc.stdout.setEncoding('utf8');
+  bashProc.stderr.setEncoding('utf8');
+  bashProc.stderr.on('data', () => {}); // 已 exec 2>&1 合流，兜底防缓冲堆积
+  bashProc.on('exit', () => { bashProc = null; });
+  bashRepo = repoPath;
+  bashProc.stdin.write('exec 2>&1\n'); // stderr 合流到 stdout，输出顺序与真终端一致
+  return bashProc;
+}
+
+let bashQueue = Promise.resolve(); // 命令串行执行，输出不会串行
+
+// 在持久会话里执行一行命令，用标记抓输出与退出码
+function runInBash(repoPath, cmdline, timeout = 30000) {
+  return new Promise((resolve) => {
+    const proc = ensureBash(repoPath);
+    if (!proc) { resolve({ code: -2, out: '', err: '未找到 Git Bash（bash.exe）' }); return; }
+    let buf = '';
+    let done = false;
+    const onData = (d) => {
+      buf += d;
+      const m = buf.match(/\x01(-?\d+)\x02/);
+      if (m) {
+        done = true;
+        proc.stdout.removeListener('data', onData);
+        resolve({ code: parseInt(m[1], 10), out: buf.slice(0, m.index), err: '' });
+      }
+    };
+    proc.stdout.on('data', onData);
+    const timer = setTimeout(() => {
+      if (!done) {
+        done = true;
+        proc.stdout.removeListener('data', onData);
+        try { proc.kill(); } catch {}
+        bashProc = null; // 超时后会话可能被卡住的命令污染，重启
+        resolve({ code: -1, out: buf, err: '命令超时' });
+      }
+    }, timeout);
+    proc.stdin.write(cmdline + "\nprintf '\\x01%d\\x02\\n' $?\n");
+  });
+}
+
+function enqueueBash(repoPath, cmdline, timeout) {
+  const task = () => runInBash(repoPath, cmdline, timeout);
+  const p = bashQueue.then(task, task);
+  bashQueue = p.then(() => {}, () => {});
+  return p;
+}
+
+function shellQuote(s) {
+  return "'" + String(s).replace(/'/g, "'\\''") + "'";
+}
+
 // ---------- IPC ----------
 ipcMain.handle('pick-folder', async () => {
   const r = await dialog.showOpenDialog(win, {
@@ -82,10 +161,23 @@ ipcMain.handle('open-repo', async (_e, p) => {
   }
 });
 
-// 通用 git 通道：渲染进程自己拼参数、自己解析输出
-ipcMain.handle('git', (_e, { repo, args, timeout }) => {
+// 通用 git 通道：走内嵌 bash 会话执行（GUI 操作实时展示在终端），无 bash 时退回直接 spawn
+ipcMain.handle('git', async (_e, { repo, args, timeout }) => {
   if (!Array.isArray(args)) return { code: -1, out: '', err: 'args 必须是数组' };
+  if (findBashExe()) {
+    const cmdline = 'git ' + args.map(shellQuote).join(' ');
+    const r = await enqueueBash(repo, cmdline, timeout || 30000);
+    return { code: r.code, out: r.out, err: r.code === 0 ? '' : (r.out.trim() || r.err || '命令失败') };
+  }
   return runGit(repo, args, timeout);
+});
+
+// 内嵌终端：用户手敲命令（与 GUI 命令同一条会话、同一个队列）
+ipcMain.handle('term-run', (_e, { repo, cmdline, timeout }) => {
+  if (typeof cmdline !== 'string' || !cmdline.trim()) {
+    return Promise.resolve({ code: -2, out: '', err: '空命令' });
+  }
+  return enqueueBash(repo, cmdline, timeout || 60000);
 });
 
 // 在资源管理器中显示文件

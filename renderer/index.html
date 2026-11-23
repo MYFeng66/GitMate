@@ -169,7 +169,15 @@
           <button id="cmdbar-toggle" class="cmd-toggle">▾ 命令与日志</button>
           <span id="cmd-last" class="cmd-last">尚未执行命令</span>
         </div>
-        <div id="cmd-log" class="cmd-log hidden"></div>
+        <div id="cmd-log" class="cmd-log hidden">
+          <div id="term-out" class="term-out"></div>
+          <div class="term-input-row">
+            <span class="term-prompt">❯</span>
+            <input id="term-input" class="term-input"
+              placeholder="输入命令回车执行（支持 cd / clear / 管道；cd 与环境变量会话内持久）"
+              autocomplete="off" spellcheck="false" />
+          </div>
+        </div>
       </div>
 
       <!-- ===== 未打开仓库时的欢迎页 ===== -->

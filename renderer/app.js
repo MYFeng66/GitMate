@@ -23,6 +23,8 @@ const state = {
   historyFilter: '',   // 历史搜索词
   branchFilter: '',    // 分支搜索词
   selectedCmpFile: null, // 对比页选中的文件
+  termHist: [],        // 终端命令历史
+  termHistIdx: -1,
 };
 
 let lastFetchTime = 0;  // 上次自动 fetch 时间戳
@@ -92,18 +94,42 @@ function logCommand(args, r, ms) {
   cmdLogEntries.unshift(entry);
   if (cmdLogEntries.length > 80) cmdLogEntries.pop();
   renderCmdBar();
+  termLogGui(args, r); // GUI 操作实时写入内嵌终端
 }
 function renderCmdBar() {
   const last = cmdLogEntries[0];
   $('#cmd-last').textContent = last
     ? `${last.text}   ${last.ok ? '✓ ' + last.ms + 'ms' : '✗ ' + (last.err || '失败')}`
     : '尚未执行命令';
-  const box = $('#cmd-log');
-  box.innerHTML = '';
-  for (const e of cmdLogEntries) {
-    box.appendChild(el('div', 'cmd-entry' + (e.ok ? '' : ' cmd-fail'),
-      `❯ ${e.text}   ${e.ok ? '✓ ' + e.ms + 'ms' : '✗ ' + e.err}`));
+}
+
+/* ---------- 内嵌终端 ---------- */
+function termAddLine(text, cls) {
+  const out = $('#term-out');
+  if (!out) return;
+  const d = el('div', 'term-line ' + (cls || ''), text);
+  out.appendChild(d);
+  while (out.childElementCount > 500) out.removeChild(out.firstChild); // 控制内存
+  out.scrollTop = out.scrollHeight;
+}
+function termNote(text) { termAddLine(text, 'tl-note'); }
+
+// 动作类命令：会连输出一起写进终端；查询类（status/log/diff…）不刷屏
+const ACTION_CMDS = new Set([
+  'add', 'commit', 'push', 'pull', 'checkout', 'switch', 'merge', 'rebase',
+  'stash', 'restore', 'clean', 'branch', 'tag', 'rm', 'mv', 'clone', 'config', 'fetch', 'init', 'reset',
+]);
+
+function termLogGui(args, r) {
+  const isAction = ACTION_CMDS.has(String(args[0] || ''));
+  if (!isAction) return;
+  termAddLine('❯ ' + fmtCmd(args), 'tl-cmd-action');
+  let outText = String(r.out || '').replace(/\n+$/, '');
+  if (outText.trim()) {
+    if (outText.length > 3000) outText = outText.slice(0, 3000) + '\n…（输出过长已截断）';
+    termAddLine(outText, 'tl-out');
   }
+  if (r.code !== 0) termAddLine('✗ ' + (r.err || '失败').slice(0, 200), 'tl-err');
 }
 
 async function git(args, opts = {}) {
@@ -218,6 +244,7 @@ function enterRepo() {
   $('#repo-mini').classList.remove('hidden');
   $('#repo-mini .repo-mini-name').textContent = state.repo.name;
   renderSidebarRepos();
+  termNote(`── 已打开仓库：${state.repo.name}（bash 会话已切换到该目录）──`);
   refresh();
   autoFetch(); // 打开/切换仓库时先静默 fetch，保证 ↑↓ 新鲜
 }
@@ -1380,6 +1407,47 @@ function bindEvents() {
 
   // 克隆
   $('#welcome-clone-btn').addEventListener('click', cloneModal);
+
+  // 内嵌终端：手敲命令（Enter 执行、↑↓ 翻历史、clear 清屏）
+  const termInput = $('#term-input');
+  termInput.addEventListener('keydown', async (e) => {
+    if (e.key === 'Enter') {
+      const cmd = termInput.value.trim();
+      termInput.value = '';
+      if (!cmd) return;
+      state.termHist.unshift(cmd);
+      state.termHistIdx = -1;
+      if (cmd === 'clear' || cmd === 'cls') { $('#term-out').innerHTML = ''; return; }
+      termAddLine('❯ ' + cmd, 'tl-cmd-user');
+      const r = await window.gitmate.termRun(state.repo ? state.repo.path : null, cmd, 300000);
+      let outText = String(r.out || '').replace(/\n+$/, '');
+      if (outText) {
+        if (outText.length > 20000) outText = outText.slice(0, 20000) + '\n…（输出过长已截断）';
+        termAddLine(outText, 'tl-out');
+      }
+      if (r.code !== 0) termAddLine(`✗ 退出码 ${r.code}${r.err ? '：' + r.err : ''}`, 'tl-err');
+      refresh();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (state.termHistIdx < state.termHist.length - 1) {
+        state.termHistIdx++;
+        termInput.value = state.termHist[state.termHistIdx];
+      }
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (state.termHistIdx > 0) {
+        state.termHistIdx--;
+        termInput.value = state.termHist[state.termHistIdx];
+      } else {
+        state.termHistIdx = -1;
+        termInput.value = '';
+      }
+    }
+  });
+  // 点击终端区域自动聚焦输入框（选中文字时不抢焦点）
+  $('#cmd-log').addEventListener('click', (e) => {
+    if (!String(window.getSelection())) termInput.focus();
+  });
 
   // 命令与日志栏：展开时显示分割线（拖动=日志变高、上方内容上挤），收起时隐藏
   $('#cmdbar-toggle').addEventListener('click', () => {
