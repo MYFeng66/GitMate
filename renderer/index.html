@@ -21,7 +21,11 @@
         <button class="nav-btn" data-tab="branches">
           <span class="nav-icon">⑂</span><span>分支</span>
         </button>
+        <button class="nav-btn" data-tab="compare">
+          <span class="nav-icon">⇄</span><span>对比</span>
+        </button>
       </nav>
+      <div id="sidebar-repos" class="sidebar-repos"></div>
       <div class="sidebar-bottom">
         <div id="repo-mini" class="repo-mini hidden">
           <div class="repo-mini-name"></div>
@@ -49,40 +53,33 @@
         </div>
       </header>
 
-      <!-- ===== 变更视图 ===== -->
+      <!-- ===== 提示条（仅异常时出现） ===== -->
+      <div id="banner" class="banner hidden">
+        <span id="banner-text"></span>
+        <span class="banner-flex"></span>
+        <button id="banner-action" class="btn-mini banner-btn"></button>
+      </div>
+
+      <!-- ===== 变更视图：单列表 + 勾选即提交 ===== -->
       <section id="view-changes" class="view active">
         <div class="changes-col">
-          <div class="panel changes-unstaged">
+          <div class="panel changes-panel">
             <div class="panel-head">
-              <span>未暂存的更改</span>
+              <span>改动</span>
               <span class="panel-actions">
-                <button id="stage-all-btn" class="btn-mini">全部暂存</button>
+                <button id="check-all-btn" class="btn-mini">全部勾选</button>
+                <button id="uncheck-all-btn" class="btn-mini">全部取消</button>
                 <button id="discard-all-btn" class="btn-mini danger">全部丢弃</button>
               </span>
             </div>
-            <div id="unstaged-list" class="file-list"></div>
-          </div>
-          <div class="panel changes-staged">
-            <div class="panel-head">
-              <span>已暂存</span>
-              <span class="panel-actions">
-                <button id="unstage-all-btn" class="btn-mini">全部取消暂存</button>
-              </span>
-            </div>
-            <div id="staged-list" class="file-list"></div>
-          </div>
-          <div class="panel commit-box">
-            <textarea id="commit-msg" rows="3" placeholder="提交信息（第一行写摘要，空行后写详情）…"></textarea>
-            <div class="commit-row">
-              <span id="commit-hint" class="commit-hint"></span>
-              <button id="commit-btn" class="btn-primary">✓ 提交</button>
-            </div>
+            <div class="list-tip">勾选 = 纳入下次提交；点文件名查看差异；右键更多操作</div>
+            <div class="file-table-head"><span></span><span>文件</span><span>工作区</span><span>下次提交</span></div>
+            <div id="change-list" class="file-list"></div>
           </div>
         </div>
         <div class="diff-col panel">
           <div id="diff-head" class="diff-head hidden">
             <span id="diff-file"></span>
-            <span id="diff-area" class="tag"></span>
           </div>
           <div id="diff-body" class="diff-body"><div class="placeholder">选择左侧文件查看差异</div></div>
         </div>
@@ -91,7 +88,12 @@
       <!-- ===== 历史视图 ===== -->
       <section id="view-history" class="view">
         <div class="hist-col panel">
-          <div class="panel-head"><span>提交历史</span></div>
+          <div class="panel-head">
+            <span>提交历史</span>
+            <span class="panel-actions">
+              <input id="history-search" class="input-inline" placeholder="搜索消息/作者…" />
+            </span>
+          </div>
           <div id="commit-list" class="commit-list"></div>
         </div>
         <div class="panel hist-detail">
@@ -109,8 +111,9 @@
       <section id="view-branches" class="view">
         <div class="panel branch-col">
           <div class="panel-head">
-            <span>本地分支</span>
+            <span>分支</span>
             <span class="panel-actions">
+              <input id="branch-search" class="input-inline" placeholder="搜索分支…" />
               <input id="new-branch-name" class="input-inline" placeholder="新分支名" />
               <button id="new-branch-btn" class="btn-mini">＋ 新建</button>
             </span>
@@ -119,12 +122,50 @@
         </div>
       </section>
 
+      <!-- ===== 对比视图 ===== -->
+      <section id="view-compare" class="view">
+        <div class="panel compare-col">
+          <div class="panel-head">
+            <span>分支对比</span>
+            <span class="panel-actions">
+              <select id="cmp-a" class="select-inline"></select>
+              <span class="cmp-vs">…</span>
+              <select id="cmp-b" class="select-inline"></select>
+              <button id="cmp-go-btn" class="btn-mini">对比</button>
+            </span>
+          </div>
+          <div id="compare-list" class="file-list"></div>
+        </div>
+        <div class="panel compare-diff">
+          <div id="cmp-diff-head" class="diff-head hidden"><span id="cmp-file"></span></div>
+          <div id="cmp-diff-body" class="diff-body"><div class="placeholder">选择两个分支，点左侧文件查看差异</div></div>
+        </div>
+      </section>
+
+      <!-- ===== 提交条（固定不随页签消失） ===== -->
+      <div id="commit-bar" class="commit-bar hidden">
+        <textarea id="commit-msg" rows="2" placeholder="提交消息（一行写完）…"></textarea>
+        <button id="commit-btn" class="btn-primary">提交</button>
+      </div>
+
+      <!-- ===== 命令预览与日志栏 ===== -->
+      <div id="cmdbar">
+        <div id="cmdbar-row">
+          <button id="cmdbar-toggle" class="cmd-toggle">▾ 命令与日志</button>
+          <span id="cmd-last" class="cmd-last">尚未执行命令</span>
+        </div>
+        <div id="cmd-log" class="cmd-log hidden"></div>
+      </div>
+
       <!-- ===== 未打开仓库时的欢迎页 ===== -->
       <section id="welcome" class="welcome">
         <div class="welcome-card">
           <div class="welcome-logo">Git<span>Mate</span></div>
           <p>一个现代化、简单易用的 Git 桌面客户端</p>
-          <button id="welcome-open-btn" class="btn-primary btn-lg">打开一个 Git 仓库</button>
+          <div class="welcome-btns">
+            <button id="welcome-open-btn" class="btn-primary btn-lg">打开一个 Git 仓库</button>
+            <button id="welcome-clone-btn" class="btn-ghost btn-lg">克隆远程仓库</button>
+          </div>
           <div id="recent-repos" class="recent-repos"></div>
         </div>
       </section>

@@ -17,8 +17,14 @@ const state = {
   selectedCommit: null, // 选中的提交 hash
   selectedCdFile: null, // 历史详情中选中的文件
   branches: [],
+  remoteBranches: [],
   currentBranch: '',
+  historyFilter: '',   // 历史搜索词
+  branchFilter: '',    // 分支搜索词
+  selectedCmpFile: null, // 对比页选中的文件
 };
+
+let lastFetchTime = 0;  // 上次自动 fetch 时间戳
 
 const MAX_LOG = 300;
 
@@ -49,17 +55,61 @@ function toast(msg, type = 'info', ms = 3200) {
   $('#toast-wrap').appendChild(t);
   setTimeout(() => { t.classList.add('fade'); setTimeout(() => t.remove(), 350); }, ms);
 }
+// 常见 git 报错 → 大白话翻译表（EasyGit 需求文档 第八章）
+const ERR_MAP = [
+  [/(non-fast-forward|fetch first|failed to push some refs)/i, '远端有你本地没有的新提交，先「拉取」再推送'],
+  [/no tracking information/i, '当前分支还没有关联远端分支，推送一次（会自动建立关联）'],
+  [/Permission denied \(publickey\)|Could not read from remote repository/i, 'SSH 密钥未配置或没有该仓库的访问权限'],
+  [/CONFLICT/i, '存在冲突文件，需要先解决冲突再提交'],
+  [/does not have any commits yet/i, '仓库还没有任何提交'],
+  [/not a git repository/i, '这个文件夹不是 Git 仓库'],
+  [/Your local changes to the following files would be overwritten/i, '本地改动会被这次操作覆盖，请先提交或丢弃改动'],
+  [/nothing to commit/i, '没有可提交的内容'],
+  [/Authentication failed/i, '认证失败：用户名/密码或令牌不对'],
+];
 function fmtGitErr(err) {
-  return String(err && err.message ? err.message : err)
-    .replace(/^error:\s?/gim, '')
-    .replace(/fatal:\s?/i, '')
-    .trim() || '未知错误';
+  const raw = String(err && err.message ? err.message : err);
+  for (const [re, msg] of ERR_MAP) {
+    if (re.test(raw)) return msg;
+  }
+  return raw.replace(/^error:\s?/gim, '').replace(/fatal:\s?/i, '').trim() || '未知错误';
 }
 
-/* ---------- 通用 git 调用 ---------- */
+/* ---------- 通用 git 调用（统一执行管道：预览命令 → 执行 → 日志 → 刷新） ---------- */
+const cmdLogEntries = [];
+function fmtCmd(args) {
+  return 'git ' + args.map((a) =>(/[\s"]/.test(a) ? '"' + a + '"' : a)).join(' ');
+}
+function logCommand(args, r, ms) {
+  const ok = r.code === 0;
+  const entry = {
+    text: fmtCmd(args),
+    ok,
+    ms,
+    err: ok ? '' : String(r.err || r.out || '失败').trim().split('\n')[0].slice(0, 140),
+  };
+  cmdLogEntries.unshift(entry);
+  if (cmdLogEntries.length > 80) cmdLogEntries.pop();
+  renderCmdBar();
+}
+function renderCmdBar() {
+  const last = cmdLogEntries[0];
+  $('#cmd-last').textContent = last
+    ? `${last.text}   ${last.ok ? '✓ ' + last.ms + 'ms' : '✗ ' + (last.err || '失败')}`
+    : '尚未执行命令';
+  const box = $('#cmd-log');
+  box.innerHTML = '';
+  for (const e of cmdLogEntries) {
+    box.appendChild(el('div', 'cmd-entry' + (e.ok ? '' : ' cmd-fail'),
+      `❯ ${e.text}   ${e.ok ? '✓ ' + e.ms + 'ms' : '✗ ' + e.err}`));
+  }
+}
+
 async function git(args, opts = {}) {
   if (!state.repo) throw new Error('未打开仓库');
+  const t0 = performance.now();
   const r = await window.gitmate.git(state.repo.path, args, opts.timeout || 20000);
+  logCommand(args, r, Math.round(performance.now() - t0));
   if (r.code !== 0 && !opts.ignoreError) {
     const e = new Error(r.err || r.out || '命令失败');
     e.raw = r;
@@ -147,19 +197,39 @@ async function openRepoPath(p) {
 
 function enterRepo() {
   $('#welcome').classList.remove('show');
+  $('#commit-bar').classList.remove('hidden');
   $('#repo-name').textContent = state.repo.name;
   $('#repo-path').textContent = state.repo.path;
   $('#repo-mini').classList.remove('hidden');
   $('#repo-mini .repo-mini-name').textContent = state.repo.name;
-  renderRecentRepos();
+  renderSidebarRepos();
   refresh();
+  autoFetch(); // 打开/切换仓库时先静默 fetch，保证 ↑↓ 新鲜
 }
 
 function showWelcome() {
   $('#welcome').classList.add('show');
+  $('#commit-bar').classList.add('hidden');
+  setBanner(null);
   $('#repo-name').textContent = '未打开仓库';
   $('#repo-path').textContent = '';
+  renderSidebarRepos();
   renderRecentRepos();
+}
+
+// 侧栏仓库列表（点谁切谁，学 Navicat 的连接列表）
+function renderSidebarRepos() {
+  const box = $('#sidebar-repos');
+  if (!box) return;
+  box.innerHTML = '';
+  box.appendChild(el('div', 'rr-title', ' 仓库列表'));
+  for (const r of state.repos.slice(0, 6)) {
+    const active = state.repo && r.path === state.repo.path;
+    const b = el('button', 'sb-repo-item' + (active ? ' active' : ''), (active ? '⭐ ' : '') + r.name);
+    b.title = r.path;
+    b.addEventListener('click', () => openRepoPath(r.path));
+    box.appendChild(b);
+  }
 }
 
 function renderRecentRepos() {
@@ -179,13 +249,9 @@ function renderRecentRepos() {
 /* ============================================================
  * git status 解析（porcelain v2）
  * ============================================================ */
+// 单列表模型：每个文件固定一行，x=下次提交状态，y=工作区状态
 function parseStatus(text) {
-  const res = { branch: '', upstream: '', ab: null, unstaged: [], staged: [] };
-  const pushEntry = (list, entry) => {
-    if (list.length && list[list.length - 1].path > entry.path) list.push(entry);
-    else list.push(entry);
-  };
-
+  const res = { branch: '', upstream: '', ab: null, files: [] };
   for (const rawLine of text.split('\n')) {
     const line = rawLine.replace(/\r$/, '');
     if (!line) continue;
@@ -196,13 +262,11 @@ function parseStatus(text) {
       const m = line.match(/\+(\d+) -(\d+)/);
       if (m) res.ab = { ahead: +m[1], behind: +m[2] };
     } else if (line.startsWith('? ')) {
-      pushEntry(res.unstaged, { path: line.slice(2), origPath: null, x: '?', y: '?', untracked: true });
+      res.files.push({ path: line.slice(2), origPath: null, x: '?', y: '?', untracked: true, conflict: false });
     } else if (line.startsWith('u ')) {
       const f = line.slice(2).split(' ');
       const p = f.slice(10).join(' ');
-      const entry = { path: p, origPath: null, x: 'U', y: 'U', conflict: true };
-      pushEntry(res.unstaged, entry);
-      pushEntry(res.staged, entry);
+      res.files.push({ path: p, origPath: null, x: 'U', y: 'U', untracked: false, conflict: true });
     } else if (line.startsWith('1 ') || line.startsWith('2 ')) {
       const xy = line.slice(2, 4);
       const rest = line.slice(5); // 去掉 "1 XY "
@@ -219,15 +283,20 @@ function parseStatus(text) {
         if (tab >= 0) { origPath = p2.slice(tab + 1); p2 = p2.slice(0, tab); }
         path = p2;
       }
-      const entry = { path, origPath, x: xy[0], y: xy[1], untracked: false };
-      if (entry.x !== ' ' && entry.x !== '?') pushEntry(res.staged, entry);
-      if (entry.y !== ' ' && entry.y !== '?') pushEntry(res.unstaged, entry);
+      res.files.push({
+        path, origPath,
+        x: xy[0], y: xy[1],
+        untracked: false,
+        conflict: xy[0] === 'U' || xy[1] === 'U',
+      });
     }
   }
   return res;
 }
 
-const STATUS_LABEL = { M: '修改', A: '新增', D: '删除', U: '冲突', R: '重命名', C: '复制', T: '类型', '?': '未跟踪' };
+// 双状态列用词（专业化，不用口水词）
+const WORK_LABEL = { M: '已修改', D: '已删除', T: '类型变更', U: '冲突', '?': '未跟踪', ' ': '—' };
+const INDEX_LABEL = { M: '已修改', A: '新增', D: '已删除', R: '重命名', C: '复制', T: '已修改', U: '待处理', ' ': '—' };
 
 /* ============================================================
  * 刷新主流程
@@ -241,6 +310,7 @@ async function refresh() {
     state.status = parseStatus(r.out);
     state.currentBranch = state.status.branch;
     updateTopbar();
+    await updateBanner();
     if (state.tab === 'changes') await renderChanges();
     else if (state.tab === 'history') await renderHistory();
     else if (state.tab === 'branches') await renderBranches();
@@ -264,109 +334,97 @@ function updateTopbar() {
   } else {
     ab.classList.add('hidden');
   }
-  const cnt = state.status.unstaged.length + state.status.staged.length;
+  const cnt = state.status.files.length;
+  $('#ab-badge').title = lastFetchTime
+    ? '上次同步：' + Math.max(1, Math.round((Date.now() - lastFetchTime) / 60000)) + ' 分钟前'
+    : '尚未同步过远端';
   const badge = $('#chg-count');
   if (cnt > 0) { badge.textContent = cnt; badge.classList.remove('hidden'); }
   else badge.classList.add('hidden');
 }
 
 /* ============================================================
- * 变更视图
+ * 变更视图（单列表 + 勾选即提交，隐藏暂存概念）
  * ============================================================ */
-async function renderChanges() {
-  const s = state.status;
-  renderFileList($('#unstaged-list'), s.unstaged, 'unstaged');
-  renderFileList($('#staged-list'), s.staged, 'staged');
-  const n = s.staged.length;
-  $('#commit-hint').textContent = n ? `已暂存 ${n} 个文件，将提交到 ${state.currentBranch || '当前分支'}` : '暂存文件后才能提交';
-  $('#commit-btn').disabled = !n;
+function checkedState(f) {
+  return !f.conflict && f.x !== ' ' && f.x !== '?';
+}
 
-  // 保持选中文件的高亮 + 差异面板
-  if (state.selectedFile) {
-    const all = [...s.unstaged, ...s.staged];
-    const still = all.find((f) => f.path === state.selectedFile.path && f.area === undefined);
-    const found = all.find((f) => f.path === state.selectedFile.path);
-    if (!found) {
-      state.selectedFile = null;
-      $('#diff-head').classList.add('hidden');
-      $('#diff-body').innerHTML = '<div class="placeholder">选择左侧文件查看差异</div>';
-    }
-  }
+async function renderChanges() {
+  renderChangeList();
+  const n = state.status.files.filter(checkedState).length;
+  $('#commit-btn').textContent = n ? `提交（${n} 个文件）` : '提交';
+  $('#commit-btn').disabled = !n;
   highlightSelection();
   if (state.selectedFile) await loadFileDiff();
 }
 
-function renderFileList(container, files, area) {
-  container.innerHTML = '';
+function renderChangeList() {
+  const box = $('#change-list');
+  box.innerHTML = '';
+  const files = state.status.files;
   if (!files.length) {
-    container.appendChild(el('div', 'empty-hint', area === 'unstaged' ? '工作区很干净 ✓' : '暂无暂存内容'));
+    box.appendChild(el('div', 'empty-hint', '工作区很干净 ✓'));
     return;
   }
   for (const f of files) {
-    const letter = f.untracked ? '?' : (area === 'staged' ? f.x : f.y);
-    const item = el('div', 'file-item');
-    item.dataset.path = f.path;
-    item.dataset.area = area;
+    const row = el('div', 'change-row' + (f.conflict ? ' conflict' : ''));
+    row.dataset.path = f.path;
 
-    const badge = el('span', 'file-status fs-' + letter, letter);
-    const name = el('span', 'file-name', f.origPath ? f.origPath + ' → ' + f.path : f.path.split('/').pop());
-    const dir = el('span', 'file-dir', f.path.split('/').slice(0, -1).join('/'));
-    const actions = el('span', 'file-actions');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = checkedState(f);
+    cb.disabled = f.conflict;
+    cb.title = f.conflict
+      ? '冲突文件需先解决（见顶部提示条）'
+      : (cb.checked ? '取消勾选：拿出下次提交（git restore --staged）' : '勾选：纳入下次提交（git add）');
+    cb.addEventListener('click', (e) => { e.stopPropagation(); toggleCheck(f, cb.checked); });
 
-    if (area === 'unstaged') {
-      const stageBtn = el('button', 'fa-btn', '+ 暂存');
-      stageBtn.addEventListener('click', (e) => { e.stopPropagation(); stageFile(f, area); });
-      actions.appendChild(stageBtn);
-      const disBtn = el('button', 'fa-btn danger', '✕ 丢弃');
-      disBtn.addEventListener('click', (e) => { e.stopPropagation(); discardFile(f); });
-      actions.appendChild(disBtn);
-    } else {
-      const unBtn = el('button', 'fa-btn', '− 取消');
-      unBtn.addEventListener('click', (e) => { e.stopPropagation(); stageFile(f, area); });
-      actions.appendChild(unBtn);
-    }
+    const name = el('span', 'cr-name', f.origPath ? f.origPath + ' → ' + f.path : f.path);
+    name.title = f.path;
+    const ws = el('span', 'cr-col', f.conflict ? '冲突' : (WORK_LABEL[f.y] || '—'));
+    const ix = el('span', 'cr-col', f.conflict ? '待处理' : (INDEX_LABEL[f.x] || '—'));
+    if (f.conflict) { ws.classList.add('cr-red'); ix.classList.add('cr-red'); }
 
-    item.appendChild(badge);
-    item.appendChild(name);
-    if (dir.textContent) item.appendChild(dir);
-    item.appendChild(actions);
-    item.title = f.path;
+    row.appendChild(cb);
+    row.appendChild(name);
+    row.appendChild(ws);
+    row.appendChild(ix);
 
-    item.addEventListener('click', () => {
-      state.selectedFile = { path: f.path, area };
+    row.addEventListener('click', () => {
+      state.selectedFile = { path: f.path };
       highlightSelection();
       loadFileDiff();
     });
-    item.addEventListener('contextmenu', (e) => {
+    row.addEventListener('contextmenu', (e) => {
       e.preventDefault();
-      showCtxMenu(e.clientX, e.clientY, fileCtxItems(f, area));
+      showCtxMenu(e.clientX, e.clientY, fileCtxItems(f));
     });
-    container.appendChild(item);
+    box.appendChild(row);
   }
 }
 
-function fileCtxItems(f, area) {
-  const items = [];
-  if (area === 'unstaged') {
-    items.push({ label: '+ 暂存此文件', action: () => stageFile(f, area) });
-    items.push({ label: '✕ 丢弃更改…', danger: true, action: () => discardFile(f) });
-  } else {
-    items.push({ label: '− 取消暂存', action: () => stageFile(f, area) });
+async function toggleCheck(f, checked) {
+  try {
+    if (checked) await git(['add', '--', f.path]);
+    else await git(['restore', '--staged', '--', f.path]);
+    await refresh();
+  } catch (e) {
+    toast(fmtGitErr(e), 'error');
+    await refresh();
   }
+}
+
+function fileCtxItems(f) {
+  const items = [];
+  items.push({
+    label: f.untracked ? '✕ 删除此新文件…' : '✕ 丢弃更改…',
+    danger: true,
+    action: () => discardFile(f),
+  });
   items.push({ label: '添加到 .gitignore', action: () => addToIgnore(f) });
   items.push({ label: '在资源管理器中显示', action: () => window.gitmate.showInFolder(state.repo.path + '\\' + f.path.replace(/\//g, '\\')) });
   return items;
-}
-
-async function stageFile(f, area) {
-  try {
-    if (area === 'unstaged') {
-      await git(f.untracked ? ['add', '--', f.path] : ['add', '--', f.path]);
-    } else {
-      await git(['restore', '--staged', '--', f.path]);
-    }
-    await refresh();
-  } catch (e) { toast(fmtGitErr(e), 'error'); }
 }
 
 function discardFile(f) {
@@ -391,10 +449,10 @@ function discardFile(f) {
 
 async function discardAll() {
   const s = state.status;
-  if (!s.unstaged.length) return;
-  const tracked = s.unstaged.filter((f) => !f.untracked).map((f) => f.path);
-  const untracked = s.unstaged.filter((f) => f.untracked).map((f) => f.path);
-  confirmModal('丢弃全部更改', `将丢弃 ${s.unstaged.length} 个文件的未暂存修改（${tracked.length} 个已跟踪 + ${untracked.length} 个未跟踪），无法撤销。确定继续？`, async () => {
+  if (!s.files.length) return;
+  const tracked = s.files.filter((f) => !f.untracked && !f.conflict).map((f) => f.path);
+  const untracked = s.files.filter((f) => f.untracked).map((f) => f.path);
+  confirmModal('丢弃全部更改', `将丢弃全部 ${s.files.length} 个文件的未提交更改（含未跟踪文件的删除），此操作无法撤销。确定继续？`, async () => {
     try {
       if (tracked.length) await git(['restore', '--', ...tracked]);
       if (untracked.length) await git(['clean', '-f', '--', ...untracked]);
@@ -412,10 +470,8 @@ async function addToIgnore(f) {
 }
 
 function highlightSelection() {
-  document.querySelectorAll('.file-item').forEach((d) => {
-    d.classList.toggle('selected',
-      state.selectedFile && d.dataset.path === state.selectedFile.path &&
-      d.dataset.area === state.selectedFile.area);
+  document.querySelectorAll('.change-row').forEach((d) => {
+    d.classList.toggle('selected', state.selectedFile && d.dataset.path === state.selectedFile.path);
   });
 }
 
@@ -425,22 +481,15 @@ async function loadFileDiff() {
   if (!f) return;
   $('#diff-head').classList.remove('hidden');
   $('#diff-file').textContent = f.path;
-  $('#diff-area').textContent = f.area === 'staged' ? '已暂存' : '未暂存';
   const body = $('#diff-body');
   body.innerHTML = '<div class="placeholder">加载中…</div>';
   try {
-    let r;
-    if (f.area === 'staged') {
-      r = await git(['diff', '--cached', '--', f.path]);
-    } else {
-      r = await git(['diff', '--', f.path]);
-    }
+    const r = await git(['diff', 'HEAD', '--', f.path]);
     body.innerHTML = '';
     if (!r.out.trim()) {
-      const s = state.status;
-      const fu = s ? s.unstaged.find((x) => x.path === f.path) : null;
-      body.innerHTML = fu && fu.untracked
-        ? '<div class="placeholder">这是新文件（未跟踪），暂存后即可看到全部内容差异</div>'
+      const sf = state.status.files.find((x) => x.path === f.path);
+      body.innerHTML = sf && sf.untracked
+        ? '<div class="placeholder">这是新文件（未跟踪），勾选提交后即可入库</div>'
         : '<div class="placeholder">无差异</div>';
       return;
     }
@@ -472,7 +521,8 @@ function renderDiff(container, text) {
 async function doCommit() {
   const msg = $('#commit-msg').value.trim();
   if (!msg) { toast('请填写提交信息', 'warn'); return; }
-  if (!state.status.staged.length) { toast('没有已暂存的文件', 'warn'); return; }
+  const n = state.status.files.filter(checkedState).length;
+  if (!n) { toast('没有勾选任何文件，先在「变更」页勾选', 'warn'); return; }
   try {
     const r = await git(['commit', '-m', msg]);
     $('#commit-msg').value = '';
@@ -512,8 +562,18 @@ async function renderHistory() {
       list.appendChild(el('div', 'empty-hint', '暂无提交记录'));
       return;
     }
-    for (const c of state.commits) {
+    // 搜索过滤（消息/作者）
+    const q = (state.historyFilter || '').toLowerCase();
+    const shown = q
+      ? state.commits.filter((c) => c.subject.toLowerCase().includes(q) || (c.author || '').toLowerCase().includes(q))
+      : state.commits;
+    if (!shown.length) {
+      list.appendChild(el('div', 'empty-hint', '没有匹配的提交'));
+      return;
+    }
+    for (const c of shown) {
       const item = el('div', 'commit-item' + (state.selectedCommit === c.hash ? ' selected' : ''));
+      item.dataset.hash = c.hash;
       const refs = c.refs.filter((x) => x !== 'HEAD' && !x.startsWith('HEAD ->'));
       if (refs.length || c.refs.some((x) => x.startsWith('HEAD'))) {
         const refBox = el('div', 'ci-refs');
@@ -547,10 +607,7 @@ async function renderHistory() {
 async function selectCommit(hash) {
   state.selectedCommit = hash;
   state.selectedCdFile = null;
-  document.querySelectorAll('.commit-item').forEach((d) => d.classList.remove('selected'));
-  const items = document.querySelectorAll('.commit-item');
-  const idx = state.commits.findIndex((c) => c.hash === hash);
-  if (items[idx]) items[idx].classList.add('selected');
+  document.querySelectorAll('.commit-item').forEach((d) => d.classList.toggle('selected', d.dataset.hash === hash));
   await renderCommitDetail();
 }
 
@@ -628,13 +685,27 @@ async function renderBranches() {
   const list = $('#branch-list');
   list.innerHTML = '<div class="empty-hint">加载中…</div>';
   try {
-    const r = await git(['branch', '--list', '--format=%(HEAD)%09%(refname:short)%09%(upstream:short)%09%(upstream:track)']);
-    state.branches = r.out.split('\n').filter(Boolean).map((line) => {
+    const fmt = '%(HEAD)%09%(refname:short)%09%(upstream:short)%09%(upstream:track)';
+    const [lr, rr] = await Promise.all([
+      git(['branch', '--list', '--format=' + fmt]),
+      git(['branch', '-r', '--list', '--format=%(refname:short)']),
+    ]);
+    state.branches = lr.out.split('\n').filter(Boolean).map((line) => {
       const f = line.split('\t');
       return { current: f[0] === '*', name: f[1] || '', upstream: f[2] || '', track: f[3] || '' };
     });
+    state.remoteBranches = rr.out.split('\n').map((s) => s.trim())
+      .filter((s) => s && !/HEAD\s*->/.test(s) && !/\bHEAD$/.test(s));
+
+    // 搜索过滤
+    const q = (state.branchFilter || '').toLowerCase();
+    const localShown = q ? state.branches.filter((b) => b.name.toLowerCase().includes(q)) : state.branches;
+    const remoteShown = q ? state.remoteBranches.filter((n) => n.toLowerCase().includes(q)) : state.remoteBranches;
+
+    // ---------- 本地分支 ----------
     list.innerHTML = '';
-    for (const b of state.branches) {
+    list.appendChild(el('div', 'group-label', `本地分支（${localShown.length}）`));
+    for (const b of localShown) {
       const item = el('div', 'branch-item' + (b.current ? ' current' : ''));
       if (b.current) item.appendChild(el('span', 'branch-dot'));
       item.appendChild(el('span', 'bi-name', b.name));
@@ -657,19 +728,87 @@ async function renderBranches() {
       item.appendChild(actions);
       list.appendChild(item);
     }
-    if (!state.branches.length) list.appendChild(el('div', 'empty-hint', '暂无本地分支'));
+    if (!localShown.length) list.appendChild(el('div', 'empty-hint', q ? '没有匹配的本地分支' : '暂无本地分支'));
+
+    // ---------- 远程分支 ----------
+    list.appendChild(el('div', 'group-label', `远程分支（${remoteShown.length}）`));
+    if (!remoteShown.length) {
+      list.appendChild(el('div', 'empty-hint', q ? '没有匹配的远程分支' : '暂无远程分支（推送一次后会出现）'));
+    }
+    for (const name of remoteShown) {
+      const localName = name.replace(/^[^/]+\//, ''); // origin/feature → feature
+      const checkedOut = state.currentBranch === localName;
+      const item = el('div', 'branch-item' + (checkedOut ? ' current' : ''));
+      if (checkedOut) item.appendChild(el('span', 'branch-dot'));
+      item.appendChild(el('span', 'bi-name', name));
+      if (checkedOut) item.appendChild(el('span', 'tag bi-checked', '已检出'));
+      const actions = el('span', 'bi-actions');
+      if (!checkedOut) {
+        const co = el('button', 'fa-btn', '检出');
+        co.addEventListener('click', () => checkoutRemote(name));
+        actions.appendChild(co);
+      }
+      const mg = el('button', 'fa-btn', '合并到当前');
+      mg.addEventListener('click', () => mergeBranch(name));
+      actions.appendChild(mg);
+      const del = el('button', 'fa-btn danger', '删除远程');
+      del.addEventListener('click', () => deleteRemoteBranch(name));
+      actions.appendChild(del);
+      item.appendChild(actions);
+      list.appendChild(item);
+    }
   } catch (e) {
     list.innerHTML = '';
     list.appendChild(el('div', 'empty-hint', '加载失败：' + fmtGitErr(e)));
   }
 }
 
+// 检出远程分支：git checkout origin/xxx 会自动创建本地跟踪分支 xxx
+async function checkoutRemote(name) {
+  const localName = name.replace(/^[^/]+\//, '');
+  guardThen(async () => {
+    try {
+      await git(['checkout', name]);
+      toast(`已检出 ${name}${state.currentBranch !== localName ? '（自动创建本地分支 ' + localName + '）' : ''}`, 'success');
+      refresh();
+    } catch (e) { toast(fmtGitErr(e), 'error'); }
+  });
+}
+
+// 删除远程分支
+function deleteRemoteBranch(name) {
+  const remoteBranch = name.replace(/^[^/]+\//, '');
+  confirmModal('删除远程分支', `将执行 git push origin --delete ${remoteBranch}，远程分支「${name}」会被删除（本地不受影响）。确定继续？`, async () => {
+    try {
+      await git(['push', 'origin', '--delete', remoteBranch], { timeout: 60000 });
+      toast('远程分支已删除', 'success');
+      refresh();
+    } catch (e) { toast(fmtGitErr(e), 'error'); }
+  });
+}
+
+// 切分支守卫：有未提交改动时先弹白话对话框（EasyGit 需求 #4）
+function guardThen(fn) {
+  const dirty = state.status && state.status.files.filter((f) => !f.conflict).length > 0;
+  if (!dirty) { fn(); return; }
+  showModal({
+    title: '有未提交的改动',
+    html: `你有 <b>${state.status.files.length}</b> 个文件的改动未提交。<br><br>` +
+          `· <b>先提交</b>（推荐）：去「变更」页勾选并提交，最安全<br>` +
+          `· <b>直接切换</b>：改动会跟着带到新分支；若与新分支的文件冲突会切换失败（不会丢数据）`,
+    okText: '直接切换',
+    onOk: fn,
+  });
+}
+
 async function switchBranch(name) {
-  try {
-    await git(['checkout', name]);
-    toast(`已切换到 ${name}`, 'success');
-    refresh();
-  } catch (e) { toast(fmtGitErr(e), 'error'); }
+  guardThen(async () => {
+    try {
+      await git(['checkout', name]);
+      toast(`已切换到 ${name}`, 'success');
+      refresh();
+    } catch (e) { toast(fmtGitErr(e), 'error'); }
+  });
 }
 
 function mergeBranch(name) {
@@ -787,6 +926,194 @@ async function doPull() {
 }
 
 /* ============================================================
+ * 提示条（仅异常时出现，"我该怎么办"）
+ * ============================================================ */
+function setBanner(text, actionLabel, handler) {
+  const b = $('#banner');
+  if (!text) { b.classList.add('hidden'); return; }
+  b.classList.remove('hidden');
+  $('#banner-text').textContent = text;
+  const btn = $('#banner-action');
+  btn.textContent = actionLabel || '';
+  btn.classList.toggle('hidden', !actionLabel);
+  btn.onclick = handler || null;
+}
+
+async function updateBanner() {
+  const s = state.status;
+  if (!s) { setBanner(null); return; }
+
+  // 1) 合并冲突进行中
+  const conflicts = s.files.filter((f) => f.conflict).length;
+  if (conflicts > 0) {
+    setBanner(`你在合并冲突中，还剩 ${conflicts} 个文件没解决`, '去处理', () => switchTab('changes'));
+    return;
+  }
+  // 2) 分离头指针
+  if (s.branch === '(detached)') {
+    setBanner('你不在任何分支上（分离头指针），现在提交的记录可能丢失', '建新分支', () =>
+      promptModal('从当前位置新建分支', '分支名', '', async (name) => {
+        try {
+          await git(['checkout', '-b', name]);
+          toast(`已创建并切换到 ${name}`, 'success');
+          refresh();
+        } catch (e) { toast(fmtGitErr(e), 'error'); }
+      }));
+    return;
+  }
+  // 3) 合并进行中（暂无冲突文件）
+  const mh = await git(['rev-parse', '-q', '--verify', 'MERGE_HEAD'], { ignoreError: true });
+  if (mh.code === 0) {
+    setBanner('合并进行中：解决冲突并提交以完成合并', '去处理', () => switchTab('changes'));
+    return;
+  }
+  // 4) 落后远端很多
+  if (s.ab && s.ab.behind >= 20) {
+    setBanner(`你已落后远端 ${s.ab.behind} 个提交，建议拉取`, '拉取', () => doPull());
+    return;
+  }
+  setBanner(null); // 其余情况一律不出声
+}
+
+/* ============================================================
+ * 分支对比（轻量版）：两个分支 → 差异文件清单 → 点文件看 diff
+ * ============================================================ */
+async function renderCompare() {
+  const refs = [...state.branches.map((b) => b.name), ...state.remoteBranches];
+  const aSel = $('#cmp-a');
+  const bSel = $('#cmp-b');
+  const sig = refs.join('|');
+  if (aSel.dataset.sig !== sig) {
+    aSel.dataset.sig = sig;
+    bSel.dataset.sig = sig;
+    const cur = state.currentBranch;
+    for (const [sel, def] of [[aSel, cur || refs[0]], [bSel, 'origin/' + (cur || refs[0])]]) {
+      sel.innerHTML = '';
+      for (const r of refs) {
+        const o = document.createElement('option');
+        o.value = r;
+        o.textContent = r;
+        sel.appendChild(o);
+      }
+      sel.value = refs.includes(def) ? def : (refs[0] || '');
+    }
+  }
+  if (aSel.value && bSel.value) await loadCompareDiff();
+}
+
+async function loadCompareDiff() {
+  const a = $('#cmp-a').value;
+  const b = $('#cmp-b').value;
+  if (!a || !b) return;
+  const list = $('#compare-list');
+  list.innerHTML = '<div class="empty-hint">对比中…</div>';
+  let files = [];
+  try {
+    // 三点 diff：从共同祖先到 b 的差异（适合"看某个分支引入了什么"）
+    const r = await git(['diff', '--name-status', '--find-renames', `${a}...${b}`]);
+    files = r.out.split('\n').filter(Boolean).map((line) => {
+      const tab = line.indexOf('\t');
+      const status = line.slice(0, tab).charAt(0);
+      let rest = line.slice(tab + 1);
+      let orig = null;
+      if (status === 'R' || status === 'C') {
+        const t2 = rest.indexOf('\t');
+        if (t2 >= 0) { orig = rest.slice(0, t2); rest = rest.slice(t2 + 1); }
+      }
+      return { path: rest, orig, status };
+    });
+  } catch (e) {
+    list.innerHTML = '';
+    list.appendChild(el('div', 'empty-hint', '对比失败：' + fmtGitErr(e)));
+    return;
+  }
+  list.innerHTML = '';
+  $('#cmp-diff-head').classList.add('hidden');
+  $('#cmp-diff-body').innerHTML = '<div class="placeholder">点左侧文件查看两个分支间的差异</div>';
+  if (!files.length) {
+    list.appendChild(el('div', 'empty-hint', '两个分支之间没有差异 ✓'));
+    return;
+  }
+  // 按目录分组
+  const groups = new Map();
+  for (const f of files) {
+    const parts = f.path.split('/');
+    const dir = parts.length > 1 ? parts.slice(0, -1).join('/') : '/';
+    if (!groups.has(dir)) groups.set(dir, []);
+    groups.get(dir).push(f);
+  }
+  for (const dir of [...groups.keys()].sort()) {
+    list.appendChild(el('div', 'group-label', dir));
+    for (const f of groups.get(dir)) {
+      const sym = { A: '+', D: '−', M: '~', R: '→', C: '+', T: '~', U: '!' }[f.status] || f.status;
+      const item = el('div', 'file-item');
+      item.appendChild(el('span', 'file-status fs-' + (f.status === 'A' ? 'A' : f.status === 'D' ? 'D' : f.status === 'R' ? 'R' : 'M'), sym));
+      item.appendChild(el('span', 'file-name', f.orig ? f.orig + ' → ' + f.path : f.path.split('/').pop()));
+      item.title = f.path;
+      item.addEventListener('click', () => viewCompareFile(a, b, f));
+      list.appendChild(item);
+    }
+  }
+}
+
+async function viewCompareFile(a, b, f) {
+  $('#cmp-diff-head').classList.remove('hidden');
+  $('#cmp-file').textContent = f.orig ? f.orig + ' → ' + f.path : f.path;
+  const body = $('#cmp-diff-body');
+  body.innerHTML = '<div class="placeholder">加载中…</div>';
+  try {
+    const r = await git(['diff', `${a}...${b}`, '--', f.orig || f.path]);
+    body.innerHTML = '';
+    if (!r.out.trim()) body.innerHTML = '<div class="placeholder">无差异</div>';
+    else renderDiff(body, r.out);
+  } catch (e) {
+    body.innerHTML = '';
+    body.appendChild(el('div', 'placeholder', '加载差异失败：' + fmtGitErr(e)));
+  }
+}
+
+/* ============================================================
+ * 自动 fetch（只读零风险；pull 永远手动）
+ * ============================================================ */
+async function autoFetch() {
+  if (!state.repo) return;
+  try {
+    await git(['fetch', '--all', '--quiet'], { timeout: 60000, ignoreError: true });
+    lastFetchTime = Date.now();
+    await refresh();
+  } catch { /* 静默失败，不打扰 */ }
+}
+setInterval(autoFetch, 5 * 60 * 1000);
+
+/* ============================================================
+ * 克隆远程仓库
+ * ============================================================ */
+function cloneModal() {
+  showModal({
+    title: '克隆远程仓库',
+    html: `<input id="clone-url" class="modal-input" placeholder="仓库地址（https:// 开头或 git@ 开头）" />` +
+          `<input id="clone-dest" class="modal-input" placeholder="目标文件夹（如 D:\\Projects\\blog）" />`,
+    okText: '克隆',
+    onOk: async () => {
+      const url = $('#clone-url').value.trim();
+      const dest = $('#clone-dest').value.trim();
+      if (!url || !dest) { toast('请填写地址和目标文件夹', 'warn'); return; }
+      toast('克隆中，请稍候…', 'info', 120000);
+      const t0 = performance.now();
+      const r = await window.gitmate.git(null, ['clone', url, dest], 300000);
+      logCommand(['clone', url, dest], r, Math.round(performance.now() - t0));
+      if (r.code === 0) {
+        toast('克隆成功', 'success');
+        openRepoPath(dest);
+      } else {
+        showModal({ title: '克隆失败', html: `<pre>${esc(r.err || r.out || '未知错误')}</pre>`, okText: '知道了' });
+      }
+    },
+  });
+  setTimeout(() => { const i = $('#clone-url'); if (i) i.focus(); }, 50);
+}
+
+/* ============================================================
  * 标签切换
  * ============================================================ */
 async function switchTab(tab) {
@@ -797,6 +1124,7 @@ async function switchTab(tab) {
   if (tab === 'changes') await renderChanges();
   else if (tab === 'history') await renderHistory();
   else if (tab === 'branches') await renderBranches();
+  else if (tab === 'compare') await renderCompare();
 }
 
 /* ============================================================
@@ -817,15 +1145,15 @@ function bindEvents() {
   $('#pull-btn').addEventListener('click', doPull);
 
   // 变更操作
-  $('#stage-all-btn').addEventListener('click', async () => {
-    if (!state.status.unstaged.length) return;
+  $('#check-all-btn').addEventListener('click', async () => {
+    if (!state.status.files.length) return;
     try {
       await git(['add', '-A']);
       refresh();
     } catch (e) { toast(fmtGitErr(e), 'error'); }
   });
-  $('#unstage-all-btn').addEventListener('click', async () => {
-    if (!state.status.staged.length) return;
+  $('#uncheck-all-btn').addEventListener('click', async () => {
+    if (!state.status.files.length) return;
     try {
       await git(['restore', '--staged', '.']);
       refresh();
@@ -840,6 +1168,30 @@ function bindEvents() {
   // 分支
   $('#new-branch-btn').addEventListener('click', createBranch);
   $('#new-branch-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') createBranch(); });
+  $('#branch-search').addEventListener('input', (e) => {
+    state.branchFilter = e.target.value;
+    if (state.tab === 'branches') renderBranches();
+  });
+
+  // 历史
+  $('#history-search').addEventListener('input', (e) => {
+    state.historyFilter = e.target.value;
+    if (state.tab === 'history') renderHistory();
+  });
+
+  // 对比
+  $('#cmp-go-btn').addEventListener('click', () => loadCompareDiff());
+  $('#cmp-a').addEventListener('change', () => loadCompareDiff());
+  $('#cmp-b').addEventListener('change', () => loadCompareDiff());
+
+  // 克隆
+  $('#welcome-clone-btn').addEventListener('click', cloneModal);
+
+  // 命令与日志栏
+  $('#cmdbar-toggle').addEventListener('click', () => {
+    $('#cmd-log').classList.toggle('hidden');
+    $('#cmdbar-toggle').textContent = $('#cmd-log').classList.contains('hidden') ? '▾ 命令与日志' : '▴ 命令与日志';
+  });
 
   // 模态框
   $('#modal-cancel').addEventListener('click', hideModal);
@@ -862,6 +1214,7 @@ function bindEvents() {
 function init() {
   loadRepos();
   bindEvents();
+  renderCmdBar();
   const last = state.repos[0];
   if (last) openRepoPath(last.path).catch(() => showWelcome());
   else showWelcome();
