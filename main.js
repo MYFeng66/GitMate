@@ -75,10 +75,19 @@ function findBashExe() {
 
 let bashProc = null;   // 当前持久会话
 let bashRepo = null;   // 会话对应的仓库目录（变更则重启会话）
+const pendingBashResolvers = new Set(); // 在途命令的完成函数，会话重启时立即放行
 
 function ensureBash(repoPath) {
   if (bashProc && bashRepo === repoPath) return bashProc;
-  if (bashProc) { try { bashProc.kill(); } catch {} bashProc = null; }
+  if (bashProc) {
+    // 会话重启（切仓库/超时）：被卡住的在途命令立刻失败返回，不让队列阻塞半分钟
+    for (const finish of pendingBashResolvers) {
+      finish({ code: -1, out: '', err: '仓库已切换，命令已中止' });
+    }
+    pendingBashResolvers.clear();
+    try { bashProc.kill(); } catch {}
+    bashProc = null;
+  }
   const exe = findBashExe();
   if (!exe) return null;
   bashProc = spawn(exe, ['--noprofile', '--norc'], {
@@ -105,24 +114,28 @@ function runInBash(repoPath, cmdline, timeout = 30000) {
     if (!proc) { resolve({ code: -2, out: '', err: '未找到 Git Bash（bash.exe）' }); return; }
     let buf = '';
     let done = false;
+    let timer = null;
+    const finish = (val) => {
+      if (done) return;
+      done = true;
+      pendingBashResolvers.delete(finish);
+      if (timer) clearTimeout(timer);
+      try { proc.stdout.removeListener('data', onData); } catch {}
+      resolve(val);
+    };
+    pendingBashResolvers.add(finish);
     const onData = (d) => {
       buf += d;
       const m = buf.match(/\x01(-?\d+)\x02/);
       if (m) {
-        done = true;
-        proc.stdout.removeListener('data', onData);
-        resolve({ code: parseInt(m[1], 10), out: buf.slice(0, m.index), err: '' });
+        finish({ code: parseInt(m[1], 10), out: buf.slice(0, m.index), err: '' });
       }
     };
     proc.stdout.on('data', onData);
-    const timer = setTimeout(() => {
-      if (!done) {
-        done = true;
-        proc.stdout.removeListener('data', onData);
-        try { proc.kill(); } catch {}
-        bashProc = null; // 超时后会话可能被卡住的命令污染，重启
-        resolve({ code: -1, out: buf, err: '命令超时' });
-      }
+    timer = setTimeout(() => {
+      try { proc.kill(); } catch {}
+      bashProc = null; // 超时后会话可能被卡住的命令污染，重启
+      finish({ code: -1, out: buf, err: '命令超时' });
     }, timeout);
     proc.stdin.write(cmdline + "\nprintf '\\x01%d\\x02\\n' $?\n");
   });

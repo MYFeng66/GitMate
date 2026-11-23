@@ -348,18 +348,22 @@ let refreshing = false;
 async function refresh() {
   if (!state.repo || refreshing) return;
   refreshing = true;
+  const gen = state.repoGen; // 记住本次刷新对应的仓库代数
   try {
     const r = await git(['status', '--porcelain=v2', '-b']);
+    if (gen !== state.repoGen) return; // 仓库已切换，丢弃过期数据
     state.status = parseStatus(r.out);
     state.currentBranch = state.status.branch;
     updateTopbar();
     await updateBanner();
+    if (gen !== state.repoGen) return;
     await updateStashBadge();
     if (state.tab === 'changes') await renderChanges();
     else if (state.tab === 'history') await renderHistory();
     else if (state.tab === 'branches') await renderBranches();
+    else if (state.tab === 'compare') await renderCompare();
   } catch (e) {
-    toast(fmtGitErr(e), 'error');
+    if (gen === state.repoGen) toast(fmtGitErr(e), 'error'); // 切仓引起的中止不报错
   } finally {
     refreshing = false;
   }
