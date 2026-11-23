@@ -14,6 +14,7 @@ const state = {
   status: null,         // git status 解析结果
   selectedFile: null,   // {path, origPath, area} area: unstaged | staged
   commits: [],          // 提交历史
+  graphRows: [],        // 泳道图行（commit 行 + 结构行）
   selectedCommit: null, // 选中的提交 hash
   selectedCdFile: null, // 历史详情中选中的文件
   branches: [],
@@ -26,7 +27,7 @@ const state = {
 
 let lastFetchTime = 0;  // 上次自动 fetch 时间戳
 
-const MAX_LOG = 300;
+const MAX_LOG = 150; // 泳道图模式下行数会变多，控制默认加载数量
 
 /* ============================================================
  * 基础工具
@@ -568,63 +569,126 @@ function parseRefs(deco) {
   return deco.trim().replace(/^\(|\)$/g, '').split(',').map((s) => s.trim()).filter(Boolean);
 }
 
+/* ---------- 泳道图（SourceTree 式提交历史树） ---------- */
+const LANE_COLORS = ['#3ecf8e', '#58a6ff', '#c297ff', '#f5b83d', '#ff7b72', '#4dd4e8', '#e58ee0', '#a8d08d', '#f2a666', '#7ee787'];
+function laneColor(col) { return LANE_COLORS[col % LANE_COLORS.length]; }
+
+// 把一行的泳道 ASCII（| * \ / _）画成 SVG
+function graphSvg(graph, height) {
+  const unit = 12;
+  const w = Math.max(graph.length, 1) * unit + 6;
+  let inner = '';
+  for (let i = 0; i < graph.length; i++) {
+    const ch = graph[i];
+    if (!'|*\/_'.includes(ch)) continue;
+    const cx = i * unit + 6;
+    const color = laneColor(i);
+    if (ch === '|') {
+      inner += `<line x1="${cx}" y1="0" x2="${cx}" y2="${height}" stroke="${color}" stroke-width="2"/>`;
+    } else if (ch === '*') {
+      inner += `<circle cx="${cx}" cy="${height / 2}" r="4.5" fill="${color}" stroke="#0e1016" stroke-width="1.5"/>`;
+    } else if (ch === '\\') {
+      inner += `<line x1="${cx}" y1="0" x2="${cx + unit}" y2="${height}" stroke="${laneColor(i + 1)}" stroke-width="2"/>`;
+    } else if (ch === '/') {
+      inner += `<line x1="${cx + unit}" y1="0" x2="${cx}" y2="${height}" stroke="${color}" stroke-width="2"/>`;
+    } else if (ch === '_') {
+      inner += `<line x1="${cx - unit / 2}" y1="1" x2="${cx + unit / 2}" y2="1" stroke="${color}" stroke-width="2"/>`;
+    }
+  }
+  return `<svg width="${w}" height="${height}" viewBox="0 0 ${w} ${height}" style="flex-shrink:0;display:block">${inner}</svg>`;
+}
+
+async function loadHistoryData() {
+  // --graph 让 git 输出泳道结构；\x01 标记数据行开头，便于切出泳道前缀
+  const r = await git([
+    'log', '--graph', `--max-count=${MAX_LOG}`, '--date=iso',
+    '--pretty=format:%x01%H%x1f%h%x1f%an%x1f%ad%x1f%s%x1f%d%x02',
+  ]);
+  const lines = r.out.replace(/\r/g, '').split('\n');
+  state.commits = [];
+  state.graphRows = [];
+  for (const line of lines) {
+    const i = line.indexOf('\x01');
+    if (i === -1) {
+      if (line.trim()) state.graphRows.push({ type: 'line', graph: line });
+      continue;
+    }
+    const graph = line.slice(0, i);
+    const f = line.slice(i + 1).replace(/\x02$/, '').split('\x1f');
+    const commit = { hash: f[0], short: f[1], author: f[2], date: f[3], subject: f[4] || '', refs: parseRefs(f[5]) };
+    state.commits.push(commit);
+    state.graphRows.push({ type: 'commit', graph, commit });
+  }
+}
+
+function makeGraphRow(graph) {
+  const row = el('div', 'graph-row');
+  row.innerHTML = graphSvg(graph, 14);
+  return row;
+}
+
+function makeCommitRow(graph, c) {
+  const item = el('div', 'commit-item' + (state.selectedCommit === c.hash ? ' selected' : ''));
+  item.dataset.hash = c.hash;
+  if (graph) item.innerHTML = graphSvg(graph, 52);
+  const body = el('div', 'ci-body');
+  item.appendChild(body);
+
+  const subjRow = el('div', 'ci-subject-row');
+  subjRow.appendChild(el('span', 'ci-subject', c.subject));
+  for (const rf of c.refs) {
+    const isHead = rf.startsWith('HEAD');
+    subjRow.appendChild(el('span', 'ref-badge' + (isHead ? ' head' : ''),
+      isHead ? rf.replace(/^HEAD -> /, 'HEAD·') : rf));
+  }
+  body.appendChild(subjRow);
+
+  const meta = el('div', 'ci-meta');
+  meta.appendChild(el('span', 'ci-hash', c.short));
+  meta.appendChild(el('span', '', c.author));
+  meta.appendChild(el('span', '', relTime(c.date)));
+  body.appendChild(meta);
+
+  item.addEventListener('click', () => selectCommit(c.hash));
+  return item;
+}
+
+function renderCommitList() {
+  const list = $('#commit-list');
+  list.innerHTML = '';
+  if (!state.commits.length) {
+    list.appendChild(el('div', 'empty-hint', '仓库还没有任何提交'));
+    return;
+  }
+  const q = (state.historyFilter || '').toLowerCase();
+  if (q) {
+    // 搜索模式：过滤会破坏泳道结构，退化为平铺列表
+    const shown = state.commits.filter((c) =>
+      c.subject.toLowerCase().includes(q) || (c.author || '').toLowerCase().includes(q));
+    if (!shown.length) { list.appendChild(el('div', 'empty-hint', '没有匹配的提交')); return; }
+    for (const c of shown) list.appendChild(makeCommitRow(null, c));
+    return;
+  }
+  for (const row of state.graphRows) {
+    list.appendChild(row.type === 'commit' ? makeCommitRow(row.graph, row.commit) : makeGraphRow(row.graph));
+  }
+}
+
 async function renderHistory() {
   const list = $('#commit-list');
   try {
-    const r = await git([
-      'log', `--max-count=${MAX_LOG}`, '--date=iso',
-      '--pretty=format:%H%x1f%h%x1f%an%x1f%ad%x1f%s%x1f%d%x1e',
-    ]);
-    const records = r.out.split('\x1e').map((s) => s.replace(/^\n/, '')).filter((s) => s.trim());
-    state.commits = records.map((rec) => {
-      const [hash, short, author, date, subject, deco] = rec.split('\x1f');
-      return { hash, short, author, date, subject: subject || '', refs: parseRefs(deco) };
-    });
-    list.innerHTML = '';
-    if (!state.commits.length) {
-      list.appendChild(el('div', 'empty-hint', '暂无提交记录'));
-      return;
-    }
-    // 搜索过滤（消息/作者）
-    const q = (state.historyFilter || '').toLowerCase();
-    const shown = q
-      ? state.commits.filter((c) => c.subject.toLowerCase().includes(q) || (c.author || '').toLowerCase().includes(q))
-      : state.commits;
-    if (!shown.length) {
-      list.appendChild(el('div', 'empty-hint', '没有匹配的提交'));
-      return;
-    }
-    for (const c of shown) {
-      const item = el('div', 'commit-item' + (state.selectedCommit === c.hash ? ' selected' : ''));
-      item.dataset.hash = c.hash;
-      const refs = c.refs.filter((x) => x !== 'HEAD' && !x.startsWith('HEAD ->'));
-      if (refs.length || c.refs.some((x) => x.startsWith('HEAD'))) {
-        const refBox = el('div', 'ci-refs');
-        for (const rf of c.refs) {
-          const isHead = rf.startsWith('HEAD');
-          const name = isHead ? rf.replace(/^HEAD -> /, '') : rf;
-          refBox.appendChild(el('span', 'ref-badge' + (isHead ? ' head' : ''), isHead ? 'HEAD · ' + name : name));
-        }
-        item.appendChild(refBox);
-      }
-      item.appendChild(el('div', 'ci-subject', c.subject));
-      const meta = el('div', 'ci-meta');
-      meta.appendChild(el('span', 'ci-hash', c.short));
-      meta.appendChild(el('span', '', c.author));
-      meta.appendChild(el('span', '', relTime(c.date)));
-      item.appendChild(meta);
-      item.addEventListener('click', () => selectCommit(c.hash));
-      list.appendChild(item);
-    }
-    if (state.selectedCommit) await renderCommitDetail();
+    await loadHistoryData();
   } catch (e) {
     if (/does not have any commits yet|unknown revision/i.test(String(e))) {
       list.innerHTML = '';
       list.appendChild(el('div', 'empty-hint', '仓库还没有任何提交'));
-    } else {
-      toast(fmtGitErr(e), 'error');
+      return;
     }
+    toast(fmtGitErr(e), 'error');
+    return;
   }
+  renderCommitList();
+  if (state.selectedCommit) await renderCommitDetail();
 }
 
 async function selectCommit(hash) {
