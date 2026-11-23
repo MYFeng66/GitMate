@@ -375,48 +375,55 @@ async function renderChanges() {
 }
 
 function renderChangeList() {
-  const box = $('#change-list');
-  box.innerHTML = '';
-  const files = state.status.files;
-  if (!files.length) {
-    box.appendChild(el('div', 'empty-hint', '工作区很干净 ✓'));
-    return;
-  }
-  for (const f of files) {
-    const row = el('div', 'change-row' + (f.conflict ? ' conflict' : ''));
-    row.dataset.path = f.path;
+  const pendingZone = $('#change-list');
+  const commitZone = $('#commit-zone-list');
+  pendingZone.innerHTML = '';
+  commitZone.innerHTML = '';
+  const pending = state.status.files.filter((f) => !checkedState(f));
+  const staged = state.status.files.filter(checkedState);
 
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.checked = checkedState(f);
-    cb.disabled = f.conflict;
-    cb.title = f.conflict
-      ? '冲突文件需先解决（见顶部提示条）'
-      : (cb.checked ? '取消勾选：拿出下次提交（git restore --staged）' : '勾选：纳入下次提交（git add）');
-    cb.addEventListener('click', (e) => { e.stopPropagation(); toggleCheck(f, cb.checked); });
+  $('#zone-pending-title').textContent = `改动区（${pending.length}）`;
+  $('#zone-commit-title').textContent = `提交区（即将提交 ${staged.length}）`;
 
-    const name = el('span', 'cr-name', f.origPath ? f.origPath + ' → ' + f.path : f.path);
-    name.title = f.path;
-    const ws = el('span', 'cr-col', f.conflict ? '冲突' : (WORK_LABEL[f.y] || '—'));
-    const ix = el('span', 'cr-col', f.conflict ? '待处理' : (INDEX_LABEL[f.x] || '—'));
-    if (f.conflict) { ws.classList.add('cr-red'); ix.classList.add('cr-red'); }
+  if (!pending.length) pendingZone.appendChild(el('div', 'empty-hint', '没有待处理的改动 ✓'));
+  for (const f of pending) pendingZone.appendChild(makeChangeRow(f, false));
+  if (!staged.length) commitZone.appendChild(el('div', 'empty-hint', '从上面勾选要提交的文件'));
+  for (const f of staged) commitZone.appendChild(makeChangeRow(f, true));
+}
 
-    row.appendChild(cb);
-    row.appendChild(name);
-    row.appendChild(ws);
-    row.appendChild(ix);
+function makeChangeRow(f, staged) {
+  const row = el('div', 'change-row' + (f.conflict ? ' conflict' : ''));
+  row.dataset.path = f.path;
 
-    row.addEventListener('click', () => {
-      state.selectedFile = { path: f.path };
-      highlightSelection();
-      loadFileDiff();
-    });
-    row.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      showCtxMenu(e.clientX, e.clientY, fileCtxItems(f));
-    });
-    box.appendChild(row);
-  }
+  const cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.checked = staged;
+  cb.disabled = f.conflict;
+  cb.title = f.conflict
+    ? '冲突文件需先解决（见顶部提示条）'
+    : (staged ? '取消勾选：拿回改动区（git restore --staged）' : '勾选：放入提交区（git add）');
+  cb.addEventListener('click', (e) => { e.stopPropagation(); toggleCheck(f, cb.checked); });
+
+  const name = el('span', 'cr-name', f.origPath ? f.origPath + ' → ' + f.path : f.path);
+  name.title = f.path;
+  const st = el('span', 'cr-col',
+    staged ? (INDEX_LABEL[f.x] || '—') : (f.conflict ? '冲突' : (WORK_LABEL[f.y] || '—')));
+  if (f.conflict) st.classList.add('cr-red');
+
+  row.appendChild(cb);
+  row.appendChild(name);
+  row.appendChild(st);
+
+  row.addEventListener('click', () => {
+    state.selectedFile = { path: f.path };
+    highlightSelection();
+    loadFileDiff();
+  });
+  row.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    showCtxMenu(e.clientX, e.clientY, fileCtxItems(f));
+  });
+  return row;
 }
 
 async function toggleCheck(f, checked) {

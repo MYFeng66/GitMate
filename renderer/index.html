@@ -64,18 +64,25 @@
       <!-- ===== 变更视图：单列表 + 勾选即提交 ===== -->
       <section id="view-changes" class="view active">
         <div class="changes-col">
-          <div class="panel changes-panel">
+          <div class="panel changes-zone">
             <div class="panel-head">
-              <span>改动</span>
+              <span id="zone-pending-title">改动区</span>
               <span class="panel-actions">
-                <button id="check-all-btn" class="btn-mini">全部勾选</button>
-                <button id="uncheck-all-btn" class="btn-mini">全部取消</button>
+                <button id="check-all-btn" class="btn-mini" title="所有改动都放入提交区">全部勾选</button>
                 <button id="discard-all-btn" class="btn-mini danger">全部丢弃</button>
               </span>
             </div>
-            <div class="list-tip">勾选 = 纳入下次提交；点文件名查看差异；右键更多操作</div>
-            <div class="file-table-head"><span></span><span>文件</span><span>工作区</span><span>下次提交</span></div>
+            <div class="list-tip">所有改动的文件；勾选 = 放入提交区；点文件名看差异；右键更多操作</div>
             <div id="change-list" class="file-list"></div>
+          </div>
+          <div class="panel changes-zone commit-zone">
+            <div class="panel-head">
+              <span id="zone-commit-title">提交区（即将提交）</span>
+              <span class="panel-actions">
+                <button id="uncheck-all-btn" class="btn-mini" title="全部拿回改动区">全部取出</button>
+              </span>
+            </div>
+            <div id="commit-zone-list" class="file-list"></div>
           </div>
         </div>
         <div class="diff-col panel">
