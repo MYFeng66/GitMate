@@ -1648,11 +1648,12 @@ function attachDrag(handle, pane, key, min, max, axis, invert) {
 }
 function initSplitters() {
   // [手柄, 面板, 存储键, 最小, 最大, 轴向, 是否反向]
+  // 右侧 diff 面板不设下限：列表可以自由拉到任意宽（泳道多时不被遮住）
   const defs = [
     ['#vs-sidebar', '#sidebar', 'gm.split.sidebar', 150, 420, 'x', false],
-    ['#vs-changes', '#view-changes .changes-col', 'gm.split.changes', 260, 720, 'x', false],
-    ['#vs-history', '#view-history .hist-col', 'gm.split.history', 280, 760, 'x', false],
-    ['#vs-compare', '#view-compare .compare-col', 'gm.split.compare', 260, 640, 'x', false],
+    ['#vs-changes', '#view-changes .changes-col', 'gm.split.changes', 220, 1600, 'x', false],
+    ['#vs-history', '#view-history .hist-col', 'gm.split.history', 220, 2000, 'x', false],
+    ['#vs-compare', '#view-compare .compare-col', 'gm.split.compare', 220, 1600, 'x', false],
     ['#hs-zones', '#view-changes .changes-zone', 'gm.split.zones', 120, 620, 'y', false],
     ['#vs-commitbar', '#commit-bar', 'gm.split.commitbar', 56, 320, 'y', true],   // 提交条上边缘：向上拉变高
     ['#vs-cmdbar', '#cmd-log', 'gm.split.cmdlog', 60, 520, 'y', true],   // 命令日志展开后：向上拉变高，把上方内容往上挤
