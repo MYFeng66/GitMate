@@ -687,7 +687,62 @@ function makeCommitRow(graph, c) {
   body.appendChild(meta);
 
   item.addEventListener('click', () => selectCommit(c.hash));
+  item.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    showCtxMenu(e.clientX, e.clientY, commitCtxItems(c));
+  });
   return item;
+}
+
+// 历史页右键菜单：回到历史版本三件套（revert / reset / checkout）
+function commitCtxItems(c) {
+  const items = [];
+  const isTip = state.commits[0] && state.commits[0].hash === c.hash; // 最新提交重置无意义
+  items.push({ label: '↩ 抵消此提交（revert）', action: () => revertCommit(c) });
+  if (!isTip) {
+    items.push({ label: '⏪ 重置分支到此版本（丢弃之后的提交）', danger: true, action: () => resetToCommit(c) });
+  }
+  items.push({ label: '👁 临时查看此版本（detached HEAD）', action: () => checkoutCommit(c) });
+  return items;
+}
+
+function revertCommit(c) {
+  confirmModal('抵消此提交（revert）', `生成一个反向提交，抵消「${c.short} ${c.subject}」的改动，历史不变。已推送的也能用。`, async () => {
+    try {
+      await git(['revert', '--no-edit', c.hash]);
+      toast(`已抵消 ${c.short}`, 'success');
+      refresh();
+    } catch (e) {
+      const raw = (e.raw && e.raw.err) || '';
+      if (/conflict/i.test(raw)) toast('抵消时遇到冲突，解决后提交即可', 'error');
+      else toast(fmtGitErr(e), 'error');
+      refresh();
+    }
+  });
+}
+
+function resetToCommit(c) {
+  const count = state.commits.findIndex((x) => x.hash === c.hash);
+  confirmModal('重置到此版本（高危）', `分支将回退到「${c.short} ${c.subject}」，之后的提交将丢弃（文件改动一并丢弃，无法撤销）。`, async () => {
+    try {
+      await git(['reset', '--hard', c.hash]);
+      toast(`已重置到 ${c.short}`, 'success');
+      refresh();
+    } catch (e) { toast(fmtGitErr(e), 'error'); refresh(); }
+  });
+}
+
+async function checkoutCommit(c) {
+  const dirty = state.status && state.status.files.filter((f) => !f.conflict).length > 0;
+  const go = async () => {
+    try {
+      await git(['checkout', c.hash]);
+      toast(`正在查看 ${c.short}（顶部提示条可返回）`, 'success');
+      refresh();
+    } catch (e) { toast(fmtGitErr(e), 'error'); }
+  };
+  if (dirty) guardThen(go, c.short);
+  else go();
 }
 
 function renderCommitList() {
