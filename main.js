@@ -193,6 +193,20 @@ ipcMain.handle('term-run', (_e, { repo, cmdline, timeout }) => {
   return enqueueBash(repo, cmdline, timeout || 60000);
 });
 
+// 自动 fetch 分流：独立一次性 git 进程执行，不占主命令队列。
+// fetch 只读零风险，可并发于所有 UI 操作；全局互斥：同一时刻最多一个。
+// （pull 会改工作区，留在主队列串行 + 守卫，不走这里）
+let fetchBusy = false;
+ipcMain.handle('git-fetch', async (_e, { repo, timeout }) => {
+  if (fetchBusy) return { code: -2, out: '', err: '已有 fetch 进行中' };
+  fetchBusy = true;
+  try {
+    return await runGit(repo, ['fetch', '--all', '--quiet'], timeout || 45000);
+  } finally {
+    fetchBusy = false;
+  }
+});
+
 // 在资源管理器中显示文件
 ipcMain.handle('show-in-folder', (_e, p) => {
   if (p && fs.existsSync(p)) shell.showItemInFolder(p);

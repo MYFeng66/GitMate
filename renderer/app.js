@@ -1302,10 +1302,15 @@ async function viewCompareFile(a, b, f) {
  * ============================================================ */
 async function autoFetch() {
   if (!state.repo) return;
+  const gen = state.repoGen;
   try {
-    await git(['fetch', '--all', '--quiet'], { timeout: 60000, ignoreError: true });
-    lastFetchTime = Date.now();
-    await refresh();
+    // 独立进程执行，不占主命令队列：fetch 期间 UI 命令（点文件/勾选/提交）零阻塞
+    const r = await window.gitmate.gitFetch(state.repo.path, 45000);
+    if (gen !== state.repoGen) return; // fetch 期间切了仓库，结果作废
+    if (r.code === 0) {
+      lastFetchTime = Date.now();
+      await refresh();
+    }
   } catch { /* 静默失败，不打扰 */ }
 }
 setInterval(autoFetch, 5 * 60 * 1000);

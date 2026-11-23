@@ -17,4 +17,6 @@ contextBridge.exposeInMainWorld('gitmate', {
   appendIgnore: (repo, entry) => ipcRenderer.invoke('append-ignore', { repo, entry }),
   // 内嵌终端：在持久 bash 会话里执行用户手敲的命令
   termRun: (repo, cmdline, timeout) => ipcRenderer.invoke('term-run', { repo, cmdline, timeout }),
+  // 自动 fetch：独立进程执行，不占主命令队列
+  gitFetch: (repo, timeout) => ipcRenderer.invoke('git-fetch', { repo, timeout }),
 });
