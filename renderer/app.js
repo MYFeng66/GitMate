@@ -354,7 +354,7 @@ function fileCtxItems(f, area) {
     items.push({ label: '− 取消暂存', action: () => stageFile(f, area) });
   }
   items.push({ label: '添加到 .gitignore', action: () => addToIgnore(f) });
-  items.push({ label: '在资源管理器中显示', action: () => window.gitmate.showInFolder(state.repo.path + '/' + f.path.replace(/\//g, '/')) });
+  items.push({ label: '在资源管理器中显示', action: () => window.gitmate.showInFolder(state.repo.path + '\\' + f.path.replace(/\//g, '\\')) });
   return items;
 }
 
@@ -628,7 +628,7 @@ async function renderBranches() {
   const list = $('#branch-list');
   list.innerHTML = '<div class="empty-hint">加载中…</div>';
   try {
-    const r = await git(['branch', '--list', '--format=%(HEAD)%09%(refname:short)%09%(upstream:short)%09%(upstream:track,upstream:remotename)']);
+    const r = await git(['branch', '--list', '--format=%(HEAD)%09%(refname:short)%09%(upstream:short)%09%(upstream:track)']);
     state.branches = r.out.split('\n').filter(Boolean).map((line) => {
       const f = line.split('\t');
       return { current: f[0] === '*', name: f[1] || '', upstream: f[2] || '', track: f[3] || '' };
