@@ -28,6 +28,13 @@ function createWindow() {
     },
   });
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  // 渲染进程报错转发到主进程日志（排查界面无响应）
+  win.webContents.on('console-message', (e, level, message, line, sourceId) => {
+    if (level >= 2) console.error(`[renderer:${level}] ${message} (${path.basename(String(sourceId))}:${line})`);
+  });
+  win.webContents.on('render-process-gone', (e, details) => {
+    console.error('[renderer-gone]', JSON.stringify(details));
+  });
 }
 
 // ---------- 通用 git 命令执行器 ----------

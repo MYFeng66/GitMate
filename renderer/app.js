@@ -1125,7 +1125,7 @@ async function updateStashBadge() {
   } catch { /* 忽略 */ }
 }
 
-async // 分支右键菜单：本地分支
+// 分支右键菜单：本地分支
 function localBranchCtxItems(b) {
   const items = [];
   if (!b.current) items.push({ label: '⑂ 切换到此分支', action: () => switchBranch(b.name) });
