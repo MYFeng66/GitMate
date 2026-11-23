@@ -1267,7 +1267,8 @@ async function renderCompare() {
     aSel.dataset.sig = sig;
     bSel.dataset.sig = sig;
     const cur = state.currentBranch;
-    for (const [sel, def] of [[aSel, cur || refs[0]], [bSel, 'origin/' + (cur || refs[0])]]) {
+    const other = refs.find((r) => r !== cur) || refs[0]; // 默认选两个不同分支，避免 A==B
+    for (const [sel, def] of [[aSel, cur || refs[0]], [bSel, other]]) {
       sel.innerHTML = '';
       for (const r of refs) {
         const o = document.createElement('option');
@@ -1287,10 +1288,13 @@ async function loadCompareDiff() {
   if (!a || !b) return;
   const list = $('#compare-list');
   list.innerHTML = '<div class="empty-hint">对比中…</div>';
+  // 头部显示实际对比的分支，避免看不出在比什么
+  $('#cmp-file').textContent = `${a} ⇄ ${b}`;
+  $('#cmp-diff-head').classList.remove('hidden');
   let files = [];
   try {
-    // 三点 diff：从共同祖先到 b 的差异（适合"看某个分支引入了什么"）
-    const r = await git(['diff', '--name-status', '--find-renames', `${a}...${b}`]);
+    // 两点直接 diff：比较两个分支的最终内容，交换方向结果一致，符合直觉
+    const r = await git(['diff', '--name-status', '--find-renames', a, b]);
     files = r.out.split('\n').filter(Boolean).map((line) => {
       const tab = line.indexOf('\t');
       const status = line.slice(0, tab).charAt(0);
@@ -1308,10 +1312,9 @@ async function loadCompareDiff() {
     return;
   }
   list.innerHTML = '';
-  $('#cmp-diff-head').classList.add('hidden');
   $('#cmp-diff-body').innerHTML = '<div class="placeholder">点左侧文件查看两个分支间的差异</div>';
   if (!files.length) {
-    list.appendChild(el('div', 'empty-hint', '两个分支之间没有差异 ✓'));
+    list.appendChild(el('div', 'empty-hint', '两个分支的最终内容完全一致 ✓'));
     return;
   }
   // 按目录分组
@@ -1338,11 +1341,11 @@ async function loadCompareDiff() {
 
 async function viewCompareFile(a, b, f) {
   $('#cmp-diff-head').classList.remove('hidden');
-  $('#cmp-file').textContent = f.orig ? f.orig + ' → ' + f.path : f.path;
+  $('#cmp-file').textContent = (f.orig ? f.orig + ' → ' + f.path : f.path) + `  (${a} ⇄ ${b})`;
   const body = $('#cmp-diff-body');
   body.innerHTML = '<div class="placeholder">加载中…</div>';
   try {
-    const r = await git(['diff', `${a}...${b}`, '--', f.orig || f.path]);
+    const r = await git(['diff', a, b, '--', f.orig || f.path]);
     body.innerHTML = '';
     if (!r.out.trim()) body.innerHTML = '<div class="placeholder">无差异</div>';
     else renderDiff(body, r.out);
@@ -1466,6 +1469,11 @@ function bindEvents() {
 
   // 对比
   $('#cmp-go-btn').addEventListener('click', () => loadCompareDiff());
+  $('#cmp-swap-btn').addEventListener('click', () => {
+    const a = $('#cmp-a'), b = $('#cmp-b');
+    [a.value, b.value] = [b.value, a.value];
+    loadCompareDiff();
+  });
   $('#cmp-a').addEventListener('change', () => loadCompareDiff());
   $('#cmp-b').addEventListener('change', () => loadCompareDiff());
 
