@@ -945,7 +945,7 @@ async function renderBranches() {
 
     // ---------- 本地分支 ----------
     list.innerHTML = '';
-    list.appendChild(el('div', 'group-label', `本地分支（${localShown.length}）`));
+    list.appendChild(el('div', 'group-label', `本地分支（${localShown.length}）——右键分支打开操作菜单`));
     for (const b of localShown) {
       const item = el('div', 'branch-item' + (b.current ? ' current' : ''));
       if (b.current) item.appendChild(el('span', 'branch-dot'));
@@ -954,19 +954,10 @@ async function renderBranches() {
         item.appendChild(el('span', 'bi-upstream', '⇄ ' + b.upstream));
         if (b.track) item.appendChild(el('span', 'bi-track', b.track.replace(/[[\]]/g, '')));
       }
-      const actions = el('span', 'bi-actions');
-      if (!b.current) {
-        const sw = el('button', 'fa-btn', '切换');
-        sw.addEventListener('click', () => switchBranch(b.name));
-        actions.appendChild(sw);
-        const mg = el('button', 'fa-btn', '合并到当前');
-        mg.addEventListener('click', () => mergeBranch(b.name));
-        actions.appendChild(mg);
-        const del = el('button', 'fa-btn danger', '删除');
-        del.addEventListener('click', () => deleteBranch(b.name));
-        actions.appendChild(del);
-      }
-      item.appendChild(actions);
+      item.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        showCtxMenu(e.clientX, e.clientY, localBranchCtxItems(b));
+      });
       list.appendChild(item);
     }
     if (!localShown.length) list.appendChild(el('div', 'empty-hint', q ? '没有匹配的本地分支' : '暂无本地分支'));
@@ -983,19 +974,10 @@ async function renderBranches() {
       if (checkedOut) item.appendChild(el('span', 'branch-dot'));
       item.appendChild(el('span', 'bi-name', name));
       if (checkedOut) item.appendChild(el('span', 'tag bi-checked', '已检出'));
-      const actions = el('span', 'bi-actions');
-      if (!checkedOut) {
-        const co = el('button', 'fa-btn', '检出');
-        co.addEventListener('click', () => checkoutRemote(name));
-        actions.appendChild(co);
-      }
-      const mg = el('button', 'fa-btn', '合并到当前');
-      mg.addEventListener('click', () => mergeBranch(name));
-      actions.appendChild(mg);
-      const del = el('button', 'fa-btn danger', '删除远程');
-      del.addEventListener('click', () => deleteRemoteBranch(name));
-      actions.appendChild(del);
-      item.appendChild(actions);
+      item.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        showCtxMenu(e.clientX, e.clientY, remoteBranchCtxItems(name, checkedOut));
+      });
       list.appendChild(item);
     }
   } catch (e) {
@@ -1143,7 +1125,39 @@ async function updateStashBadge() {
   } catch { /* 忽略 */ }
 }
 
-async function switchBranch(name) {
+async // 分支右键菜单：本地分支
+function localBranchCtxItems(b) {
+  const items = [];
+  if (!b.current) items.push({ label: '⑂ 切换到此分支', action: () => switchBranch(b.name) });
+  items.push({ label: '＋ 从此分支建立新分支…', action: () => createBranchFrom(b.name) });
+  items.push({ label: '⇉ 合并到当前分支', action: () => mergeBranch(b.name) });
+  if (!b.current) items.push({ label: '✕ 删除分支…', danger: true, action: () => deleteBranch(b.name) });
+  return items;
+}
+
+// 分支右键菜单：远程分支
+function remoteBranchCtxItems(name, checkedOut) {
+  const items = [];
+  if (!checkedOut) items.push({ label: '⑂ 检出为新本地分支', action: () => checkoutRemote(name) });
+  items.push({ label: '＋ 从此分支建立新分支…', action: () => createBranchFrom(name) });
+  items.push({ label: '⇉ 合并到当前分支', action: () => mergeBranch(name) });
+  items.push({ label: '✕ 删除远程分支…', danger: true, action: () => deleteRemoteBranch(name) });
+  return items;
+}
+
+// 从指定分支（本地或远程 ref）建立新分支
+function createBranchFrom(base) {
+  promptModal(`从「${base}」建立新分支`, '新分支名', '', async (name) => {
+    if (!/^[^ ~^:?*[\]\\]+$/.test(name)) { toast('分支名包含非法字符', 'error'); return; }
+    try {
+      await git(['branch', name, base]);
+      toast(`已创建 ${name}（基于 ${base}），可在列表中切换`, 'success');
+      refresh();
+    } catch (e) { toast(fmtGitErr(e), 'error'); }
+  });
+}
+
+function switchBranch(name) {
   guardThen(async () => {
     try {
       await git(['checkout', name]);
