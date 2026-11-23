@@ -147,7 +147,7 @@ body {
 }
 .branch-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
 .ab-badge { color: var(--amber); font-size: 11px; }
-.top-actions { margin-left: auto; display: flex; gap: 8px; }
+.top-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
 
 /* ==================== 按钮 ==================== */
 .btn-ghost, .btn-primary, .btn-mini, .btn-lg {
@@ -573,7 +573,32 @@ body {
   margin-top: 8px;
   font-family: var(--mono);
 }
-.modal-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 18px; }
+.modal-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 9px; margin-top: 18px; }
+.modal-actions textarea.modal-input { resize: none; height: 84px; }
+
+/* 贮藏徽章与列表 */
+.stash-badge {
+  background: rgba(245, 184, 61, 0.16);
+  border: 1px solid var(--amber);
+  color: var(--amber);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 12px;
+  cursor: pointer;
+}
+.stash-badge:hover { background: rgba(245, 184, 61, 0.3); }
+.stash-list { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.stash-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: space-between;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 11px;
+}
+.stash-msg { font-size: 12px; color: var(--text); user-select: text; word-break: break-all; }
 
 /* ==================== 命令与日志栏 ==================== */
 #cmdbar {

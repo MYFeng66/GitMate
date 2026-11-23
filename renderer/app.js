@@ -118,19 +118,33 @@ async function git(args, opts = {}) {
   return r;
 }
 
-/* ---------- 模态框 ---------- */
-let modalCb = null;
+/* ---------- 模态框（按钮组动态生成，支持多选项） ---------- */
+function setModalActions(choices) {
+  const box = $('#modal-actions');
+  box.innerHTML = '';
+  for (const c of choices) {
+    const b = el('button', (c.cls || 'btn-ghost'), c.label);
+    b.addEventListener('click', () => { hideModal(); if (c.fn) c.fn(); });
+    box.appendChild(b);
+  }
+}
 function showModal({ title, html, okText = '确定', danger = false, onOk }) {
   $('#modal-title').textContent = title;
   $('#modal-body').innerHTML = html;
-  $('#modal-ok').textContent = okText;
-  $('#modal-ok').className = danger ? 'btn-danger' : 'btn-primary';
-  modalCb = onOk || null;
+  setModalActions([
+    { label: '取消', cls: 'btn-ghost' },
+    { label: okText, cls: danger ? 'btn-danger' : 'btn-primary', fn: onOk },
+  ]);
+  $('#modal-wrap').classList.remove('hidden');
+}
+function showModalChoices({ title, html, choices }) {
+  $('#modal-title').textContent = title;
+  $('#modal-body').innerHTML = html;
+  setModalActions(choices);
   $('#modal-wrap').classList.remove('hidden');
 }
 function hideModal() {
   $('#modal-wrap').classList.add('hidden');
-  modalCb = null;
 }
 function confirmModal(title, msg, onOk) {
   showModal({
@@ -311,6 +325,7 @@ async function refresh() {
     state.currentBranch = state.status.branch;
     updateTopbar();
     await updateBanner();
+    await updateStashBadge();
     if (state.tab === 'changes') await renderChanges();
     else if (state.tab === 'history') await renderHistory();
     else if (state.tab === 'branches') await renderBranches();
@@ -772,7 +787,7 @@ async function checkoutRemote(name) {
       toast(`已检出 ${name}${state.currentBranch !== localName ? '（自动创建本地分支 ' + localName + '）' : ''}`, 'success');
       refresh();
     } catch (e) { toast(fmtGitErr(e), 'error'); }
-  });
+  }, name);
 }
 
 // 删除远程分支
@@ -787,18 +802,119 @@ function deleteRemoteBranch(name) {
   });
 }
 
-// 切分支守卫：有未提交改动时先弹白话对话框（EasyGit 需求 #4）
-function guardThen(fn) {
+// 切分支守卫：有未提交改动时给出 4 个选项（带着走 / 提交后走 / 贮藏后走 / 取消）
+function guardThen(switchFn, branchName) {
   const dirty = state.status && state.status.files.filter((f) => !f.conflict).length > 0;
-  if (!dirty) { fn(); return; }
-  showModal({
+  if (!dirty) { switchFn(); return; }
+  const n = state.status.files.length;
+  showModalChoices({
     title: '有未提交的改动',
-    html: `你有 <b>${state.status.files.length}</b> 个文件的改动未提交。<br><br>` +
-          `· <b>先提交</b>（推荐）：去「变更」页勾选并提交，最安全<br>` +
-          `· <b>直接切换</b>：改动会跟着带到新分支；若与新分支的文件冲突会切换失败（不会丢数据）`,
-    okText: '直接切换',
-    onOk: fn,
+    html: `你有 <b>${n}</b> 个文件的改动未提交，切换分支时怎么处理？<br><br>` +
+          `· <b>带着切换</b>：改动跟到新分支，仍是未提交状态（若与新分支的文件冲突会切换失败，不会丢数据）<br>` +
+          `· <b>提交后切换</b>：改动先钉进当前分支的历史，新分支上看到不到<br>` +
+          `· <b>贮藏后切换</b>：改动放进保险柜（stash），切回来后随时取出，最灵活<br>` +
+          `· <b>取消</b>：留在当前分支`,
+    choices: [
+      { label: '带着切换', cls: 'btn-primary', fn: switchFn },
+      { label: '提交后切换', cls: 'btn-primary', fn: () => commitThenSwitch(branchName) },
+      { label: '贮藏后切换', cls: 'btn-primary', fn: () => stashThenSwitch(branchName) },
+      { label: '取消', cls: 'btn-ghost' },
+    ],
   });
+}
+
+// 选项 2：弹窗填提交信息 → 全部提交 → 切换
+function commitThenSwitch(branchName) {
+  const n = state.status.files.length;
+  showModal({
+    title: '提交后切换',
+    html: `将提交全部 <b>${n}</b> 个文件的改动（git add -A + git commit），然后切换到 <b>${esc(branchName)}</b>。` +
+          `<textarea id="wip-msg" class="modal-input" rows="3" placeholder="提交信息（改动未写完可写 WIP: xxx，回头再补）"></textarea>`,
+    okText: '提交并切换',
+    onOk: async () => {
+      const msg = $('#wip-msg').value.trim();
+      if (!msg) { toast('请填写提交信息', 'warn'); return; }
+      try {
+        await git(['add', '-A']);
+        await git(['commit', '-m', msg]);
+        toast('已提交', 'success');
+        await git(['checkout', branchName]);
+        toast(`已切换到 ${branchName}`, 'success');
+        refresh();
+      } catch (e) {
+        toast(fmtGitErr(e), 'error');
+        refresh();
+      }
+    },
+  });
+  setTimeout(() => { const t = $('#wip-msg'); if (t) t.focus(); }, 50);
+}
+
+// 选项 3：贮藏（stash）后切换；切回来后顶栏徽章提醒取出
+async function stashThenSwitch(branchName) {
+  try {
+    await git(['stash', 'push', '-u', '-m', `切到 ${branchName} 前的自动贮藏（原分支：${state.currentBranch}）`]);
+    toast('改动已存入贮藏（stash），工作区已变干净；切回来后点顶栏「📦 贮藏」取出', 'success', 6000);
+    await git(['checkout', branchName]);
+    toast(`已切换到 ${branchName}`, 'success');
+    refresh();
+  } catch (e) {
+    toast(fmtGitErr(e), 'error');
+    refresh();
+  }
+}
+
+// 贮藏管理：列出所有 stash，可取出（pop）/删除（drop）
+function stashModal() {
+  git(['stash', 'list']).then((r) => {
+    const lines = r.out.split('\n').filter((s) => s.startsWith('stash@{'));
+    let html;
+    if (!lines.length) {
+      html = '当前没有贮藏的内容。';
+    } else {
+      html = '以下是你贮藏的改动（不属于任何分支），「取出并恢复」会把它应用到当前分支并删除该条；取出时若与当前分支冲突会提示：<div class="stash-list">' +
+        lines.map((line, i) => {
+          const end = line.indexOf('}');
+          const ref = line.slice(0, end + 1);
+          const msg = esc(line.slice(end + 2).trim());
+          return `<div class="stash-row"><span class="stash-msg">${i + 1}. ${msg}</span>` +
+            `<span><button class="fa-btn" data-ref="${esc(ref)}" data-act="pop">取出并恢复</button> ` +
+            `<button class="fa-btn danger" data-ref="${esc(ref)}" data-act="drop">删除</button></span></div>`;
+        }).join('') + '</div>';
+    }
+    showModal({ title: '贮藏的改动（stash）', html, okText: '关闭' });
+    document.querySelectorAll('#modal-body .fa-btn').forEach((b) => {
+      b.addEventListener('click', async () => {
+        try {
+          if (b.dataset.act === 'pop') {
+            await git(['stash', 'pop', b.dataset.ref]);
+            toast('已取出贮藏的改动，恢复到工作区', 'success');
+          } else {
+            await git(['stash', 'drop', b.dataset.ref]);
+            toast('已删除该条贮藏', 'success');
+          }
+          hideModal();
+          refresh();
+        } catch (e) { toast(fmtGitErr(e), 'error'); }
+      });
+    });
+  }).catch((e) => toast(fmtGitErr(e), 'error'));
+}
+
+// 顶栏贮藏徽章：有未取出的 stash 时醒目显示
+async function updateStashBadge() {
+  try {
+    const r = await git(['stash', 'list'], { ignoreError: true });
+    const cnt = r.out.split('\n').filter((s) => s.startsWith('stash@{')).length;
+    state.stashCount = cnt;
+    const b = $('#stash-badge');
+    if (cnt > 0) {
+      b.textContent = `📦 贮藏 ${cnt}`;
+      b.classList.remove('hidden');
+    } else {
+      b.classList.add('hidden');
+    }
+  } catch { /* 忽略 */ }
 }
 
 async function switchBranch(name) {
@@ -808,7 +924,7 @@ async function switchBranch(name) {
       toast(`已切换到 ${name}`, 'success');
       refresh();
     } catch (e) { toast(fmtGitErr(e), 'error'); }
-  });
+  }, name);
 }
 
 function mergeBranch(name) {
@@ -1193,9 +1309,11 @@ function bindEvents() {
     $('#cmdbar-toggle').textContent = $('#cmd-log').classList.contains('hidden') ? '▾ 命令与日志' : '▴ 命令与日志';
   });
 
-  // 模态框
-  $('#modal-cancel').addEventListener('click', hideModal);
-  $('#modal-ok').addEventListener('click', () => { const cb = modalCb; hideModal(); if (cb) cb(); });
+  // 模态框（按钮组动态生成）；点背景关闭
+  $('#modal-wrap').addEventListener('click', (e) => { if (e.target === $('#modal-wrap')) hideModal(); });
+
+  // 贮藏徽章
+  $('#stash-badge').addEventListener('click', stashModal);
 
   // 全局
   document.addEventListener('click', () => hideCtxMenu());
