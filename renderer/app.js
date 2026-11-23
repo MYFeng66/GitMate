@@ -282,7 +282,8 @@ function parseStatus(text) {
       const p = f.slice(10).join(' ');
       res.files.push({ path: p, origPath: null, x: 'U', y: 'U', untracked: false, conflict: true });
     } else if (line.startsWith('1 ') || line.startsWith('2 ')) {
-      const xy = line.slice(2, 4);
+      // 关键：porcelain v2 中“未修改”用 '.' 表示，归一化为空格，与 v1 语义统一
+      const xy = line.slice(2, 4).replace(/\./g, ' ');
       const rest = line.slice(5); // 去掉 "1 XY "
       const f = rest.split(' ');
       let path, origPath = null;
