@@ -400,6 +400,11 @@ body {
   border-radius: 999px;
   background: var(--accent-soft);
   color: var(--accent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 150px;
+  flex-shrink: 0;
 }
 .ref-badge.head { background: var(--green-soft); color: var(--green); font-weight: 700; }
 .commit-detail-head { flex-shrink: 0; padding: 12px 14px; border-bottom: 1px solid var(--border); }
@@ -597,6 +602,19 @@ body {
   padding: 8px 11px;
 }
 .stash-msg { font-size: 12px; color: var(--text); user-select: text; word-break: break-all; }
+
+/* ==================== 可拖动分割线 ==================== */
+.vsplit {
+  flex-shrink: 0;
+  width: 7px;
+  cursor: col-resize;
+  border-left: 1px solid transparent;
+  transition: background 0.15s, border-color 0.15s;
+}
+.vsplit:hover, .vsplit.dragging {
+  background: var(--accent-soft);
+  border-left-color: var(--accent);
+}
 
 /* ==================== 命令与日志栏 ==================== */
 #cmdbar {

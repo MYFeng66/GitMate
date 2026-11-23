@@ -586,6 +586,8 @@ function graphSvg(graph, height) {
     if (ch === '|') {
       inner += `<line x1="${cx}" y1="0" x2="${cx}" y2="${height}" stroke="${color}" stroke-width="2"/>`;
     } else if (ch === '*') {
+      // 提交点所在泳道也要画贯穿线，否则相邻提交之间断开
+      inner += `<line x1="${cx}" y1="0" x2="${cx}" y2="${height}" stroke="${color}" stroke-width="2"/>`;
       inner += `<circle cx="${cx}" cy="${height / 2}" r="4.5" fill="${color}" stroke="#0e1016" stroke-width="1.5"/>`;
     } else if (ch === '\\') {
       inner += `<line x1="${cx}" y1="0" x2="${cx + unit}" y2="${height}" stroke="${laneColor(i + 1)}" stroke-width="2"/>`;
@@ -636,10 +638,14 @@ function makeCommitRow(graph, c) {
 
   const subjRow = el('div', 'ci-subject-row');
   subjRow.appendChild(el('span', 'ci-subject', c.subject));
-  for (const rf of c.refs) {
+  const maxRefs = 3; // 徽标太多会撑爆行，最多展示 3 个 + ＋N
+  for (const rf of c.refs.slice(0, maxRefs)) {
     const isHead = rf.startsWith('HEAD');
     subjRow.appendChild(el('span', 'ref-badge' + (isHead ? ' head' : ''),
       isHead ? rf.replace(/^HEAD -> /, 'HEAD·') : rf));
+  }
+  if (c.refs.length > maxRefs) {
+    subjRow.appendChild(el('span', 'ref-badge', '+' + (c.refs.length - maxRefs)));
   }
   body.appendChild(subjRow);
 
@@ -1401,9 +1407,46 @@ function bindEvents() {
 /* ============================================================
  * 启动
  * ============================================================ */
+/* ---------- 可拖动分割线（宽度记忆到 localStorage） ---------- */
+function initSplitters() {
+  const defs = [
+    ['#vs-sidebar', '#sidebar', 'gm.split.sidebar', 150, 420],
+    ['#vs-changes', '#view-changes .changes-col', 'gm.split.changes', 260, 720],
+    ['#vs-history', '#view-history .hist-col', 'gm.split.history', 280, 760],
+    ['#vs-compare', '#view-compare .compare-col', 'gm.split.compare', 260, 640],
+  ];
+  for (const [handleSel, paneSel, key, min, max] of defs) {
+    const handle = $(handleSel);
+    const pane = $(paneSel);
+    if (!handle || !pane) continue;
+    const saved = parseInt(localStorage.getItem(key), 10);
+    if (saved >= min && saved <= max) pane.style.width = saved + 'px';
+    handle.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const startW = pane.getBoundingClientRect().width;
+      handle.classList.add('dragging');
+      document.body.style.cursor = 'col-resize';
+      const move = (ev) => {
+        pane.style.width = Math.min(Math.max(startW + (ev.clientX - startX), min), max) + 'px';
+      };
+      const up = () => {
+        handle.classList.remove('dragging');
+        document.body.style.cursor = '';
+        document.removeEventListener('mousemove', move);
+        document.removeEventListener('mouseup', up);
+        localStorage.setItem(key, String(Math.round(pane.getBoundingClientRect().width)));
+      };
+      document.addEventListener('mousemove', move);
+      document.addEventListener('mouseup', up);
+    });
+  }
+}
+
 function init() {
   loadRepos();
   bindEvents();
+  initSplitters();
   renderCmdBar();
   const last = state.repos[0];
   if (last) openRepoPath(last.path).catch(() => showWelcome());
