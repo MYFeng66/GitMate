@@ -264,7 +264,7 @@ function renderSidebarRepos() {
   const box = $('#sidebar-repos');
   if (!box) return;
   box.innerHTML = '';
-  box.appendChild(el('div', 'rr-title', ' 仓库列表——右键更多操作'));
+  box.appendChild(el('div', 'rr-title', ' 仓库列表'));
   for (const r of state.repos.slice(0, 6)) {
     const active = state.repo && r.path === state.repo.path;
     const b = el('button', 'sb-repo-item' + (active ? ' active' : ''), (active ? '⭐ ' : '') + r.name);
