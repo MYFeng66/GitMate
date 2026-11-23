@@ -259,19 +259,46 @@ function showWelcome() {
   renderRecentRepos();
 }
 
-// 侧栏仓库列表（点谁切谁，学 Navicat 的连接列表）
+// 侧栏仓库列表（点谁切谁，学 Navicat 的连接列表；右键弹操作菜单）
 function renderSidebarRepos() {
   const box = $('#sidebar-repos');
   if (!box) return;
   box.innerHTML = '';
-  box.appendChild(el('div', 'rr-title', ' 仓库列表'));
+  box.appendChild(el('div', 'rr-title', ' 仓库列表——右键更多操作'));
   for (const r of state.repos.slice(0, 6)) {
     const active = state.repo && r.path === state.repo.path;
     const b = el('button', 'sb-repo-item' + (active ? ' active' : ''), (active ? '⭐ ' : '') + r.name);
     b.title = r.path;
     b.addEventListener('click', () => openRepoPath(r.path));
+    b.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      showCtxMenu(e.clientX, e.clientY, repoCtxItems(r));
+    });
     box.appendChild(b);
   }
+}
+
+// 仓库右键菜单
+function repoCtxItems(r) {
+  return [
+    { label: '⭐ 打开此仓库', action: () => openRepoPath(r.path) },
+    { label: '📂 在资源管理器中显示', action: () => window.gitmate.showInFolder(r.path) },
+    { label: '❯ 在终端中打开', action: async () => {
+        const res = await window.gitmate.openTerminal(r.path);
+        if (!res.ok) toast('打开终端失败：' + (res.error || ''), 'error');
+      } },
+    { label: '📋 复制仓库路径', action: async () => {
+        try { await navigator.clipboard.writeText(r.path); toast('路径已复制', 'success'); }
+        catch { toast('复制失败', 'error'); }
+      } },
+    { label: '✕ 从列表移除', danger: true, action: () => {
+        state.repos = state.repos.filter((x) => x.path !== r.path);
+        saveRepos();
+        renderSidebarRepos();
+        renderRecentRepos();
+        toast(`已从列表移除 ${r.name}（仓库文件不受影响）`, 'success');
+      } },
+  ];
 }
 
 function renderRecentRepos() {

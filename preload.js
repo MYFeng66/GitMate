@@ -19,4 +19,6 @@ contextBridge.exposeInMainWorld('gitmate', {
   termRun: (repo, cmdline, timeout) => ipcRenderer.invoke('term-run', { repo, cmdline, timeout }),
   // 自动 fetch：独立进程执行，不占主命令队列
   gitFetch: (repo, timeout) => ipcRenderer.invoke('git-fetch', { repo, timeout }),
+  // 在外部终端打开目录
+  openTerminal: (repoPath) => ipcRenderer.invoke('open-terminal', repoPath),
 });

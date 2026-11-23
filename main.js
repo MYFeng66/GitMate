@@ -200,6 +200,19 @@ ipcMain.handle('term-run', (_e, { repo, cmdline, timeout }) => {
   return enqueueBash(repo, cmdline, timeout || 60000);
 });
 
+// 在外部终端打开仓库目录（新开 cmd 窗口）
+ipcMain.handle('open-terminal', (_e, repoPath) => {
+  try {
+    const child = spawn('cmd.exe', ['/c', 'start', 'cmd', '/K', `cd /d "${repoPath}"`], {
+      cwd: repoPath, detached: true, stdio: 'ignore', windowsHide: false,
+    });
+    child.unref();
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+
 // 自动 fetch 分流：独立一次性 git 进程执行，不占主命令队列。
 // fetch 只读零风险，可并发于所有 UI 操作；全局互斥：同一时刻最多一个。
 // （pull 会改工作区，留在主队列串行 + 守卫，不走这里）
