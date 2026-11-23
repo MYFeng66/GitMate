@@ -607,27 +607,44 @@ function laneColor(col) { return LANE_COLORS[((col % LANE_COLORS.length) + LANE_
 const ROW_H = 52;   // 提交行高度（与 CSS .commit-item 一致）
 const LANE_W = 12;  // 每条泳道宽度
 
-// 根据父提交关系计算每条泳道，输出每行的 SVG
+// 根据父提交关系计算每条泳道，输出每行的 SVG（IDEA 风格：平滑曲线 + 泳道色稳定）
 function buildGraphRows(commits) {
-  const lanes = [];   // 在途泳道：{ head: 下一个期望出现的提交 hash | null=待回收 }
+  const lanes = [];   // 在途泳道：{ head: 下一个期望出现的提交 hash | null=待回收, color: 线色, isNew }
   const rows = [];
+  let colorCursor = 0;
   const cx = (col) => col * LANE_W + 6;
+  const nextColor = () => LANE_COLORS[colorCursor++ % LANE_COLORS.length];
+  // 平滑 S 曲线（IDEA 同款过渡）
+  const curve = (x1, y1, x2, y2, color) => {
+    const k = Math.max(8, (y2 - y1) * 0.55);
+    return `<path d="M ${x1} ${y1} C ${x1} ${y1 + k}, ${x2} ${y2 - k}, ${x2} ${y2}" fill="none" stroke="${color}" stroke-width="2"/>`;
+  };
 
   for (const c of commits) {
     // 1. 找到本提交所在泳道（topo 序保证父提交在子提交之后出现）
     let dotCol = lanes.findIndex((l) => l.head === c.hash);
-    if (dotCol === -1) { dotCol = lanes.length; lanes.push({ head: c.hash, isNew: true }); }
+    if (dotCol === -1) {
+      dotCol = lanes.length;
+      lanes.push({ head: c.hash, color: nextColor(), isNew: true });
+    }
+    const dotColor = lanes[dotCol].color;
 
     // 2. 计算本行之后的泳道状态（mapped）
     const parents = c.parents || [];
     const p1 = parents[0] || null;
-    const mapped = lanes.map((l, j) => ({ head: j === dotCol ? p1 : l.head, isNew: l.isNew }));
-    mapped[dotCol].isNew = false; // 提交点所在泳道上方有线
+    const mapped = lanes.map((l, j) => ({
+      head: j === dotCol ? p1 : l.head,
+      color: l.color,
+      isNew: l.isNew && j !== dotCol,
+    }));
     const mergeEdges = [];
     for (let k = 1; k < parents.length; k++) {
       const p = parents[k];
       let col = mapped.findIndex((l) => l.head === p);
-      if (col === -1) { mapped.push({ head: p, isNew: true }); col = mapped.length - 1; }
+      if (col === -1) {
+        mapped.push({ head: p, color: nextColor(), isNew: true });
+        col = mapped.length - 1;
+      }
       if (col !== dotCol) mergeEdges.push({ to: col });
     }
     // 第一父若已在其他泳道（截断窗口可能发生）：当前泳道汇入它并回收
@@ -651,27 +668,33 @@ function buildGraphRows(commits) {
     const width = Math.max(mapped.length, 1) * LANE_W + 6;
     let inner = '';
     for (let j = 0; j < mapped.length; j++) {
-      if (mapped[j].isNew) continue;           // 新泳道由合并斜线接入，上方无线
+      if (mapped[j].isNew) continue; // 新泳道由曲线接入，上方无线
+      const col = mapped[j].color;
       const m = colMap[j];
       if (m === -1) {
-        // 泳道到本行终止（根提交）
-        inner += `<line x1="${cx(j)}" y1="0" x2="${cx(j)}" y2="${ROW_H / 2}" stroke="${laneColor(j)}" stroke-width="2"/>`;
+        inner += `<line x1="${cx(j)}" y1="0" x2="${cx(j)}" y2="${ROW_H / 2}" stroke="${col}" stroke-width="2"/>`;
       } else if (m === j) {
-        inner += `<line x1="${cx(j)}" y1="0" x2="${cx(j)}" y2="${ROW_H}" stroke="${laneColor(j)}" stroke-width="2"/>`;
+        inner += `<line x1="${cx(j)}" y1="0" x2="${cx(j)}" y2="${ROW_H}" stroke="${col}" stroke-width="2"/>`;
       } else {
-        // 泳道列左移（左侧泳道回收）：上半段竖线 + 下半段斜线
-        inner += `<line x1="${cx(j)}" y1="0" x2="${cx(j)}" y2="${ROW_H / 2}" stroke="${laneColor(j)}" stroke-width="2"/>`;
-        inner += `<line x1="${cx(j)}" y1="${ROW_H / 2}" x2="${cx(m)}" y2="${ROW_H}" stroke="${laneColor(m)}" stroke-width="2"/>`;
+        inner += `<line x1="${cx(j)}" y1="0" x2="${cx(j)}" y2="${ROW_H / 2}" stroke="${col}" stroke-width="2"/>`;
+        inner += curve(cx(j), ROW_H / 2, cx(m), ROW_H, col);
       }
     }
     for (const e of mergeEdges) {
       const to = colMap[e.to];
-      inner += `<line x1="${cx(dotCol)}" y1="${ROW_H / 2}" x2="${cx(to)}" y2="${ROW_H}" stroke="${laneColor(to)}" stroke-width="2"/>`;
+      inner += curve(cx(dotCol), ROW_H / 2, cx(to), ROW_H, mapped[e.to].color);
     }
-    inner += `<circle cx="${cx(dotCol)}" cy="${ROW_H / 2}" r="4.5" fill="${laneColor(dotCol)}" stroke="#0e1016" stroke-width="1.5"/>`;
+    inner += `<circle cx="${cx(dotCol)}" cy="${ROW_H / 2}" r="4.5" fill="${dotColor}" stroke="#0e1016" stroke-width="1.5"/>`;
 
-    const svg = `<svg width="${width}" height="${ROW_H}" viewBox="0 0 ${width} ${ROW_H}" style="flex-shrink:0;display:block">${inner}</svg>`;
+    const svg = `<svg width="${width}" height="${ROW_H}" viewBox="0 0 ${width} ${ROW_H}" style="flex-shrink:0;display:block;overflow:visible">${inner}</svg>`;
     rows.push({ type: 'commit', svg, commit: c });
+  }
+
+  // 最后一行：在途泳道向下延伸一小段，表示历史未完（加载窗口截断）
+  if (rows.length) {
+    const extra = lanes.map((l, i) =>
+      `<line x1="${cx(i)}" y1="${ROW_H}" x2="${cx(i)}" y2="${ROW_H + 26}" stroke="${l.color}" stroke-width="2"/>`).join('');
+    rows[rows.length - 1].svg = rows[rows.length - 1].svg.replace('</svg>', extra + '</svg>');
   }
   return rows;
 }
