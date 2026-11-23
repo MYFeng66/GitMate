@@ -710,9 +710,9 @@ function buildGraphRows(commits) {
 }
 
 async function loadHistoryData() {
-  // 日期序（与 IDEA 一致）：所有在途分支的泳道持续展开；%P 取父提交自行布局
+  // topo 序：单条分支历史连续可读（用户标定回退）；%P 取父提交自行布局
   const r = await git([
-    'log', `--max-count=${MAX_LOG}`, '--date=iso',
+    'log', `--max-count=${MAX_LOG}`, '--topo-order', '--date=iso',
     '--pretty=format:%x01%H%x1f%P%x1f%h%x1f%an%x1f%ad%x1f%s%x1f%d%x02',
   ]);
   const lines = r.out.replace(/\r/g, '').split('\n');
