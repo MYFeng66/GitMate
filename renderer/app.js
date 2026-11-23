@@ -600,70 +600,109 @@ function parseRefs(deco) {
   return deco.trim().replace(/^\(|\)$/g, '').split(',').map((s) => s.trim()).filter(Boolean);
 }
 
-/* ---------- 泳道图（SourceTree 式提交历史树） ---------- */
+/* ---------- 泳道图（自算泳道布局，不依赖 git --graph 的 ASCII） ---------- */
 const LANE_COLORS = ['#3ecf8e', '#58a6ff', '#c297ff', '#f5b83d', '#ff7b72', '#4dd4e8', '#e58ee0', '#a8d08d', '#f2a666', '#7ee787'];
-function laneColor(col) { return LANE_COLORS[col % LANE_COLORS.length]; }
+function laneColor(col) { return LANE_COLORS[((col % LANE_COLORS.length) + LANE_COLORS.length) % LANE_COLORS.length]; }
 
-// 把一行的泳道 ASCII（| * \ / _）画成 SVG
-function graphSvg(graph, height) {
-  const unit = 12;
-  const w = Math.max(graph.length, 1) * unit + 6;
-  let inner = '';
-  for (let i = 0; i < graph.length; i++) {
-    const ch = graph[i];
-    if (!'|*\/_'.includes(ch)) continue;
-    const cx = i * unit + 6;
-    const color = laneColor(i);
-    if (ch === '|') {
-      inner += `<line x1="${cx}" y1="0" x2="${cx}" y2="${height}" stroke="${color}" stroke-width="2"/>`;
-    } else if (ch === '*') {
-      // 提交点所在泳道也要画贯穿线，否则相邻提交之间断开
-      inner += `<line x1="${cx}" y1="0" x2="${cx}" y2="${height}" stroke="${color}" stroke-width="2"/>`;
-      inner += `<circle cx="${cx}" cy="${height / 2}" r="4.5" fill="${color}" stroke="#0e1016" stroke-width="1.5"/>`;
-    } else if (ch === '\\') {
-      inner += `<line x1="${cx}" y1="0" x2="${cx + unit}" y2="${height}" stroke="${laneColor(i + 1)}" stroke-width="2"/>`;
-    } else if (ch === '/') {
-      inner += `<line x1="${cx + unit}" y1="0" x2="${cx}" y2="${height}" stroke="${color}" stroke-width="2"/>`;
-    } else if (ch === '_') {
-      inner += `<line x1="${cx - unit / 2}" y1="1" x2="${cx + unit / 2}" y2="1" stroke="${color}" stroke-width="2"/>`;
+const ROW_H = 52;   // 提交行高度（与 CSS .commit-item 一致）
+const LANE_W = 12;  // 每条泳道宽度
+
+// 根据父提交关系计算每条泳道，输出每行的 SVG
+function buildGraphRows(commits) {
+  const lanes = [];   // 在途泳道：{ head: 下一个期望出现的提交 hash | null=待回收 }
+  const rows = [];
+  const cx = (col) => col * LANE_W + 6;
+
+  for (const c of commits) {
+    // 1. 找到本提交所在泳道（topo 序保证父提交在子提交之后出现）
+    let dotCol = lanes.findIndex((l) => l.head === c.hash);
+    if (dotCol === -1) { dotCol = lanes.length; lanes.push({ head: c.hash, isNew: true }); }
+
+    // 2. 计算本行之后的泳道状态（mapped）
+    const parents = c.parents || [];
+    const p1 = parents[0] || null;
+    const mapped = lanes.map((l, j) => ({ head: j === dotCol ? p1 : l.head, isNew: l.isNew }));
+    mapped[dotCol].isNew = false; // 提交点所在泳道上方有线
+    const mergeEdges = [];
+    for (let k = 1; k < parents.length; k++) {
+      const p = parents[k];
+      let col = mapped.findIndex((l) => l.head === p);
+      if (col === -1) { mapped.push({ head: p, isNew: true }); col = mapped.length - 1; }
+      if (col !== dotCol) mergeEdges.push({ to: col });
     }
+    // 第一父若已在其他泳道（截断窗口可能发生）：当前泳道汇入它并回收
+    if (p1) {
+      const dup = mapped.findIndex((l, idx) => idx !== dotCol && l.head === p1);
+      if (dup !== -1) { mapped[dotCol].head = null; mergeEdges.push({ to: dup }); }
+    }
+
+    // 3. 回收空泳道（根提交后），并记录旧列→新列映射
+    const colMap = new Array(mapped.length);
+    const newLanes = [];
+    for (let j = 0; j < mapped.length; j++) {
+      if (mapped[j].head === null) { colMap[j] = -1; continue; }
+      colMap[j] = newLanes.length;
+      newLanes.push(mapped[j]);
+    }
+    lanes.length = 0;
+    lanes.push(...newLanes);
+
+    // 4. 绘制本行 SVG
+    const width = Math.max(mapped.length, 1) * LANE_W + 6;
+    let inner = '';
+    for (let j = 0; j < mapped.length; j++) {
+      if (mapped[j].isNew) continue;           // 新泳道由合并斜线接入，上方无线
+      const m = colMap[j];
+      if (m === -1) {
+        // 泳道到本行终止（根提交）
+        inner += `<line x1="${cx(j)}" y1="0" x2="${cx(j)}" y2="${ROW_H / 2}" stroke="${laneColor(j)}" stroke-width="2"/>`;
+      } else if (m === j) {
+        inner += `<line x1="${cx(j)}" y1="0" x2="${cx(j)}" y2="${ROW_H}" stroke="${laneColor(j)}" stroke-width="2"/>`;
+      } else {
+        // 泳道列左移（左侧泳道回收）：上半段竖线 + 下半段斜线
+        inner += `<line x1="${cx(j)}" y1="0" x2="${cx(j)}" y2="${ROW_H / 2}" stroke="${laneColor(j)}" stroke-width="2"/>`;
+        inner += `<line x1="${cx(j)}" y1="${ROW_H / 2}" x2="${cx(m)}" y2="${ROW_H}" stroke="${laneColor(m)}" stroke-width="2"/>`;
+      }
+    }
+    for (const e of mergeEdges) {
+      const to = colMap[e.to];
+      inner += `<line x1="${cx(dotCol)}" y1="${ROW_H / 2}" x2="${cx(to)}" y2="${ROW_H}" stroke="${laneColor(to)}" stroke-width="2"/>`;
+    }
+    inner += `<circle cx="${cx(dotCol)}" cy="${ROW_H / 2}" r="4.5" fill="${laneColor(dotCol)}" stroke="#0e1016" stroke-width="1.5"/>`;
+
+    const svg = `<svg width="${width}" height="${ROW_H}" viewBox="0 0 ${width} ${ROW_H}" style="flex-shrink:0;display:block">${inner}</svg>`;
+    rows.push({ type: 'commit', svg, commit: c });
   }
-  return `<svg width="${w}" height="${height}" viewBox="0 0 ${w} ${height}" style="flex-shrink:0;display:block">${inner}</svg>`;
+  return rows;
 }
 
 async function loadHistoryData() {
-  // --graph 让 git 输出泳道结构；\x01 标记数据行开头，便于切出泳道前缀
+  // topo 序保证子提交先于父提交出现；%P 取父提交，泳道布局自行计算
   const r = await git([
-    'log', '--graph', `--max-count=${MAX_LOG}`, '--date=iso',
-    '--pretty=format:%x01%H%x1f%h%x1f%an%x1f%ad%x1f%s%x1f%d%x02',
+    'log', `--max-count=${MAX_LOG}`, '--topo-order', '--date=iso',
+    '--pretty=format:%x01%H%x1f%P%x1f%h%x1f%an%x1f%ad%x1f%s%x1f%d%x02',
   ]);
   const lines = r.out.replace(/\r/g, '').split('\n');
-  state.commits = [];
-  state.graphRows = [];
+  const commits = [];
   for (const line of lines) {
     const i = line.indexOf('\x01');
-    if (i === -1) {
-      if (line.trim()) state.graphRows.push({ type: 'line', graph: line });
-      continue;
-    }
-    const graph = line.slice(0, i);
+    if (i === -1 || !line.trim()) continue;
     const f = line.slice(i + 1).replace(/\x02$/, '').split('\x1f');
-    const commit = { hash: f[0], short: f[1], author: f[2], date: f[3], subject: f[4] || '', refs: parseRefs(f[5]) };
-    state.commits.push(commit);
-    state.graphRows.push({ type: 'commit', graph, commit });
+    commits.push({
+      hash: f[0],
+      parents: (f[1] || '').split(' ').filter(Boolean),
+      short: f[2], author: f[3], date: f[4],
+      subject: f[5] || '', refs: parseRefs(f[6]),
+    });
   }
-}
-
-function makeGraphRow(graph) {
-  const row = el('div', 'graph-row');
-  row.innerHTML = graphSvg(graph, 14);
-  return row;
+  state.commits = commits;
+  state.graphRows = buildGraphRows(commits);
 }
 
 function makeCommitRow(graph, c) {
   const item = el('div', 'commit-item' + (state.selectedCommit === c.hash ? ' selected' : ''));
   item.dataset.hash = c.hash;
-  if (graph) item.innerHTML = graphSvg(graph, 52);
+  if (graph) item.innerHTML = graph; // graph 参数现在是构建好的 SVG 字符串
   const body = el('div', 'ci-body');
   item.appendChild(body);
 
@@ -762,7 +801,7 @@ function renderCommitList() {
     return;
   }
   for (const row of state.graphRows) {
-    list.appendChild(row.type === 'commit' ? makeCommitRow(row.graph, row.commit) : makeGraphRow(row.graph));
+    list.appendChild(makeCommitRow(row.svg, row.commit));
   }
 }
 
