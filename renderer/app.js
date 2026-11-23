@@ -1381,10 +1381,12 @@ function bindEvents() {
   // 克隆
   $('#welcome-clone-btn').addEventListener('click', cloneModal);
 
-  // 命令与日志栏
+  // 命令与日志栏：展开时显示分割线（拖动=日志变高、上方内容上挤），收起时隐藏
   $('#cmdbar-toggle').addEventListener('click', () => {
-    $('#cmd-log').classList.toggle('hidden');
-    $('#cmdbar-toggle').textContent = $('#cmd-log').classList.contains('hidden') ? '▾ 命令与日志' : '▴ 命令与日志';
+    const log = $('#cmd-log');
+    log.classList.toggle('hidden');
+    $('#vs-cmdbar').classList.toggle('hidden', log.classList.contains('hidden'));
+    $('#cmdbar-toggle').textContent = log.classList.contains('hidden') ? '▾ 命令与日志' : '▴ 命令与日志';
   });
 
   // 模态框（按钮组动态生成）；点背景关闭
@@ -1450,8 +1452,8 @@ function initSplitters() {
     ['#vs-history', '#view-history .hist-col', 'gm.split.history', 280, 760, 'x', false],
     ['#vs-compare', '#view-compare .compare-col', 'gm.split.compare', 260, 640, 'x', false],
     ['#hs-zones', '#view-changes .changes-zone', 'gm.split.zones', 120, 620, 'y', false],
-    ['#vs-commitbar', '#commit-bar', 'gm.split.commitbar', 56, 320, 'y', true],   // 拖上边缘：向上拉变高
-    ['#vs-cmdbar', '#commit-bar', 'gm.split.commitbar', 56, 320, 'y', false],   // 拖下边缘：向下拉变高
+    ['#vs-commitbar', '#commit-bar', 'gm.split.commitbar', 56, 320, 'y', true],   // 提交条上边缘：向上拉变高
+    ['#vs-cmdbar', '#cmd-log', 'gm.split.cmdlog', 60, 520, 'y', true],   // 命令日志展开后：向上拉变高，把上方内容往上挤
   ];
   for (const [handleSel, paneSel, key, min, max, axis, invert] of defs) {
     const handle = $(handleSel);

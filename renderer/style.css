@@ -318,11 +318,12 @@ body {
   margin: 0 12px 10px;
   padding: 9px 10px;
   display: flex;
-  align-items: flex-end;
+  align-items: stretch; /* 文本框跟随拖动后的高度变化 */
   gap: 10px;
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  overflow: hidden;
 }
 #commit-msg {
   flex: 1;
@@ -338,7 +339,7 @@ body {
   user-select: text;
 }
 #commit-msg:focus { border-color: var(--accent); }
-#commit-btn { height: 36px; white-space: nowrap; }
+#commit-btn { height: 36px; white-space: nowrap; align-self: flex-end; } /* 按钮不随高度变化 */
 
 /* ==================== 差异视图 ==================== */
 .diff-head {
@@ -654,7 +655,7 @@ body {
 }
 .cmd-log {
   margin-top: 6px;
-  max-height: 170px;
+  height: 170px; /* 默认高度，可用分割线拖动调整 */
   overflow-y: auto;
   border-top: 1px solid var(--border);
   padding-top: 5px;
