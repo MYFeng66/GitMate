@@ -76,6 +76,7 @@
             <div class="list-tip">所有改动的文件；勾选 = 放入提交区；点文件名看差异；右键更多操作</div>
             <div id="change-list" class="file-list"></div>
           </div>
+          <div id="hs-zones" class="hsplit"></div>
           <div class="panel changes-zone commit-zone">
             <div class="panel-head">
               <span id="zone-commit-title">提交区（即将提交）</span>
@@ -154,11 +155,13 @@
         </div>
       </section>
 
-      <!-- ===== 提交条（固定不随页签消失） ===== -->
+      <!-- ===== 提交条（固定不随页签消失，上下边缘可拖动调高度） ===== -->
+      <div id="vs-commitbar" class="hsplit"></div>
       <div id="commit-bar" class="commit-bar hidden">
         <textarea id="commit-msg" rows="2" placeholder="提交消息（一行写完）…"></textarea>
         <button id="commit-btn" class="btn-primary">提交</button>
       </div>
+      <div id="vs-cmdbar" class="hsplit"></div>
 
       <!-- ===== 命令预览与日志栏 ===== -->
       <div id="cmdbar">

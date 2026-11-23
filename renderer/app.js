@@ -1407,39 +1407,57 @@ function bindEvents() {
 /* ============================================================
  * 启动
  * ============================================================ */
-/* ---------- 可拖动分割线（宽度记忆到 localStorage） ---------- */
+/* ---------- 可拖动分割线（横向/纵向通用，尺寸记忆到 localStorage） ---------- */
+function applyPaneSize(pane, size, axis) {
+  if (axis === 'x') {
+    pane.style.width = size + 'px';
+  } else {
+    pane.style.height = size + 'px';
+    pane.style.flex = 'none'; // 纵向面板原先用 flex 比例分配，改为固定高度后锁定
+  }
+}
+function attachDrag(handle, pane, key, min, max, axis, invert) {
+  const saved = parseInt(localStorage.getItem(key), 10);
+  if (saved >= min && saved <= max) applyPaneSize(pane, saved, axis);
+  handle.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    const start = axis === 'x' ? e.clientX : e.clientY;
+    const rect = pane.getBoundingClientRect();
+    const startSize = axis === 'x' ? rect.width : rect.height;
+    handle.classList.add('dragging');
+    document.body.style.cursor = axis === 'x' ? 'col-resize' : 'row-resize';
+    const move = (ev) => {
+      const delta = (axis === 'x' ? ev.clientX : ev.clientY) - start;
+      const size = invert ? startSize - delta : startSize + delta;
+      applyPaneSize(pane, Math.min(Math.max(size, min), max), axis);
+    };
+    const up = () => {
+      handle.classList.remove('dragging');
+      document.body.style.cursor = '';
+      document.removeEventListener('mousemove', move);
+      document.removeEventListener('mouseup', up);
+      localStorage.setItem(key, String(Math.round(axis === 'x' ? pane.getBoundingClientRect().width : pane.getBoundingClientRect().height)));
+    };
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+  });
+}
 function initSplitters() {
+  // [手柄, 面板, 存储键, 最小, 最大, 轴向, 是否反向]
   const defs = [
-    ['#vs-sidebar', '#sidebar', 'gm.split.sidebar', 150, 420],
-    ['#vs-changes', '#view-changes .changes-col', 'gm.split.changes', 260, 720],
-    ['#vs-history', '#view-history .hist-col', 'gm.split.history', 280, 760],
-    ['#vs-compare', '#view-compare .compare-col', 'gm.split.compare', 260, 640],
+    ['#vs-sidebar', '#sidebar', 'gm.split.sidebar', 150, 420, 'x', false],
+    ['#vs-changes', '#view-changes .changes-col', 'gm.split.changes', 260, 720, 'x', false],
+    ['#vs-history', '#view-history .hist-col', 'gm.split.history', 280, 760, 'x', false],
+    ['#vs-compare', '#view-compare .compare-col', 'gm.split.compare', 260, 640, 'x', false],
+    ['#hs-zones', '#view-changes .changes-zone', 'gm.split.zones', 120, 620, 'y', false],
+    ['#vs-commitbar', '#commit-bar', 'gm.split.commitbar', 56, 320, 'y', true],   // 拖上边缘：向上拉变高
+    ['#vs-cmdbar', '#commit-bar', 'gm.split.commitbar', 56, 320, 'y', false],   // 拖下边缘：向下拉变高
   ];
-  for (const [handleSel, paneSel, key, min, max] of defs) {
+  for (const [handleSel, paneSel, key, min, max, axis, invert] of defs) {
     const handle = $(handleSel);
     const pane = $(paneSel);
     if (!handle || !pane) continue;
-    const saved = parseInt(localStorage.getItem(key), 10);
-    if (saved >= min && saved <= max) pane.style.width = saved + 'px';
-    handle.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      const startX = e.clientX;
-      const startW = pane.getBoundingClientRect().width;
-      handle.classList.add('dragging');
-      document.body.style.cursor = 'col-resize';
-      const move = (ev) => {
-        pane.style.width = Math.min(Math.max(startW + (ev.clientX - startX), min), max) + 'px';
-      };
-      const up = () => {
-        handle.classList.remove('dragging');
-        document.body.style.cursor = '';
-        document.removeEventListener('mousemove', move);
-        document.removeEventListener('mouseup', up);
-        localStorage.setItem(key, String(Math.round(pane.getBoundingClientRect().width)));
-      };
-      document.addEventListener('mousemove', move);
-      document.addEventListener('mouseup', up);
-    });
+    attachDrag(handle, pane, key, min, max, axis, invert);
   }
 }
 
