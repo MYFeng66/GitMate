@@ -607,82 +607,92 @@ function laneColor(col) { return LANE_COLORS[((col % LANE_COLORS.length) + LANE_
 const ROW_H = 52;   // 提交行高度（与 CSS .commit-item 一致）
 const LANE_W = 12;  // 每条泳道宽度
 
-// 根据父提交关系计算每条泳道，输出每行的 SVG（IDEA 风格：平滑曲线 + 泳道色稳定）
+// 根据父提交关系计算每条泳道，输出每行的 SVG（IDEA 风格：日期序 + 平滑曲线 + 泳道色稳定）
 function buildGraphRows(commits) {
-  const lanes = [];   // 在途泳道：{ head: 下一个期望出现的提交 hash | null=待回收, color: 线色, isNew }
+  const lanes = [];   // 在途泳道：{ head: 下一个期望出现的提交 hash | null=待回收, color, isNew, oldCol }
   const rows = [];
   let colorCursor = 0;
-  const cx = (col) => col * LANE_W + 6;
   const nextColor = () => LANE_COLORS[colorCursor++ % LANE_COLORS.length];
-  // 平滑 S 曲线（IDEA 同款过渡）
+  const cx = (col) => col * LANE_W + 6;
   const curve = (x1, y1, x2, y2, color) => {
     const k = Math.max(8, (y2 - y1) * 0.55);
     return `<path d="M ${x1} ${y1} C ${x1} ${y1 + k}, ${x2} ${y2 - k}, ${x2} ${y2}" fill="none" stroke="${color}" stroke-width="2"/>`;
   };
 
   for (const c of commits) {
-    // 1. 找到本提交所在泳道（topo 序保证父提交在子提交之后出现）
     let dotCol = lanes.findIndex((l) => l.head === c.hash);
     if (dotCol === -1) {
       dotCol = lanes.length;
-      lanes.push({ head: c.hash, color: nextColor(), isNew: true });
+      lanes.push({ head: c.hash, color: nextColor(), isNew: true, oldCol: -1 });
     }
     const dotColor = lanes[dotCol].color;
 
-    // 2. 计算本行之后的泳道状态（mapped）
-    const parents = c.parents || [];
-    const p1 = parents[0] || null;
-    const mapped = lanes.map((l, j) => ({
-      head: j === dotCol ? p1 : l.head,
-      color: l.color,
-      isNew: l.isNew && j !== dotCol,
-    }));
+    const p1 = (c.parents && c.parents[0]) || null;
+
+    // pass 1: 构建 mapped（新列顺序）+ 各类边的坐标
+    const mapped = [];
+    const forkClosures = []; // 分叉闭合：其他分支线也指向本提交（日期序下的分叉点）
+    let dotMapped = -1;
+    lanes.forEach((l, j) => {
+      if (j === dotCol) {
+        dotMapped = mapped.length;
+        mapped.push({ head: p1, color: l.color, isNew: false, oldCol: j });
+      } else if (l.head === c.hash) {
+        forkClosures.push({ from: j, color: l.color });
+      } else {
+        mapped.push({ head: l.head, color: l.color, isNew: l.isNew, oldCol: j });
+      }
+    });
     const mergeEdges = [];
-    for (let k = 1; k < parents.length; k++) {
-      const p = parents[k];
+    for (let k = 1; k < (c.parents || []).length; k++) {
+      const p = c.parents[k];
       let col = mapped.findIndex((l) => l.head === p);
       if (col === -1) {
-        mapped.push({ head: p, color: nextColor(), isNew: true });
+        mapped.push({ head: p, color: nextColor(), isNew: true, oldCol: -1 });
         col = mapped.length - 1;
       }
-      if (col !== dotCol) mergeEdges.push({ to: col });
+      if (col !== dotMapped) mergeEdges.push({ to: col });
     }
-    // 第一父若已在其他泳道（截断窗口可能发生）：当前泳道汇入它并回收
     if (p1) {
-      const dup = mapped.findIndex((l, idx) => idx !== dotCol && l.head === p1);
-      if (dup !== -1) { mapped[dotCol].head = null; mergeEdges.push({ to: dup }); }
+      const dup = mapped.findIndex((l, idx) => idx !== dotMapped && l.head === p1);
+      if (dup !== -1) { mapped[dotMapped].head = null; mergeEdges.push({ to: dup }); }
     }
 
-    // 3. 回收空泳道（根提交后），并记录旧列→新列映射
+    // pass 2: 回收空泳道（根提交），并给幸存泳道记录最终列
     const colMap = new Array(mapped.length);
     const newLanes = [];
     for (let j = 0; j < mapped.length; j++) {
       if (mapped[j].head === null) { colMap[j] = -1; continue; }
       colMap[j] = newLanes.length;
+      mapped[j].finalCol = newLanes.length;
       newLanes.push(mapped[j]);
     }
     lanes.length = 0;
     lanes.push(...newLanes);
 
-    // 4. 绘制本行 SVG
+    // pass 3: 绘制存活泳道（新泳道由合并曲线接入，上方无线）
     const width = Math.max(mapped.length, 1) * LANE_W + 6;
     let inner = '';
-    for (let j = 0; j < mapped.length; j++) {
-      if (mapped[j].isNew) continue; // 新泳道由曲线接入，上方无线
-      const col = mapped[j].color;
-      const m = colMap[j];
-      if (m === -1) {
-        inner += `<line x1="${cx(j)}" y1="0" x2="${cx(j)}" y2="${ROW_H / 2}" stroke="${col}" stroke-width="2"/>`;
-      } else if (m === j) {
-        inner += `<line x1="${cx(j)}" y1="0" x2="${cx(j)}" y2="${ROW_H}" stroke="${col}" stroke-width="2"/>`;
+    for (const f of newLanes) {
+      if (f.isNew || f.oldCol === -1) continue;
+      if (f.finalCol === f.oldCol) {
+        inner += `<line x1="${cx(f.oldCol)}" y1="0" x2="${cx(f.oldCol)}" y2="${ROW_H}" stroke="${f.color}" stroke-width="2"/>`;
       } else {
-        inner += `<line x1="${cx(j)}" y1="0" x2="${cx(j)}" y2="${ROW_H / 2}" stroke="${col}" stroke-width="2"/>`;
-        inner += curve(cx(j), ROW_H / 2, cx(m), ROW_H, col);
+        inner += curve(cx(f.oldCol), 0, cx(f.finalCol), ROW_H, f.color);
       }
     }
+    // 提交点泳道：上半段竖线 + 下段（第一父延续）
+    inner += `<line x1="${cx(dotCol)}" y1="0" x2="${cx(dotCol)}" y2="${ROW_H / 2}" stroke="${dotColor}" stroke-width="2"/>`;
+    if (p1) {
+      const dfc = colMap[dotMapped];
+      if (dfc === dotCol) inner += `<line x1="${cx(dotCol)}" y1="${ROW_H / 2}" x2="${cx(dotCol)}" y2="${ROW_H}" stroke="${dotColor}" stroke-width="2"/>`;
+      else inner += curve(cx(dotCol), ROW_H / 2, cx(dfc), ROW_H, dotColor);
+    }
+    for (const f of forkClosures) {
+      inner += curve(cx(f.from), 0, cx(dotCol), ROW_H / 2, f.color);
+    }
     for (const e of mergeEdges) {
-      const to = colMap[e.to];
-      inner += curve(cx(dotCol), ROW_H / 2, cx(to), ROW_H, mapped[e.to].color);
+      inner += curve(cx(dotCol), ROW_H / 2, cx(colMap[e.to]), ROW_H, mapped[e.to].color);
     }
     inner += `<circle cx="${cx(dotCol)}" cy="${ROW_H / 2}" r="4.5" fill="${dotColor}" stroke="#0e1016" stroke-width="1.5"/>`;
 
@@ -700,9 +710,9 @@ function buildGraphRows(commits) {
 }
 
 async function loadHistoryData() {
-  // topo 序保证子提交先于父提交出现；%P 取父提交，泳道布局自行计算
+  // 日期序（与 IDEA 一致）：所有在途分支的泳道持续展开；%P 取父提交自行布局
   const r = await git([
-    'log', `--max-count=${MAX_LOG}`, '--topo-order', '--date=iso',
+    'log', `--max-count=${MAX_LOG}`, '--date=iso',
     '--pretty=format:%x01%H%x1f%P%x1f%h%x1f%an%x1f%ad%x1f%s%x1f%d%x02',
   ]);
   const lines = r.out.replace(/\r/g, '').split('\n');
