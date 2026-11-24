@@ -334,7 +334,8 @@ function parseStatus(text) {
       res.files.push({ path: line.slice(2), origPath: null, x: '?', y: '?', untracked: true, conflict: false });
     } else if (line.startsWith('u ')) {
       const f = line.slice(2).split(' ');
-      const p = f.slice(10).join(' ');
+      // unmerged 行格式：u XY sub m1 m2 m3 mW h1 h2 h3 <path>（path 从第 9 段起）
+      const p = f.slice(9).join(' ');
       res.files.push({ path: p, origPath: null, x: 'U', y: 'U', untracked: false, conflict: true });
     } else if (line.startsWith('1 ') || line.startsWith('2 ')) {
       // 关键：porcelain v2 中“未修改”用 '.' 表示，归一化为空格，与 v1 语义统一
