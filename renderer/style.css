@@ -129,7 +129,7 @@ body {
   gap: 14px;
   padding: 0 16px;
   border-bottom: 1px solid var(--border);
-  background: rgba(21, 24, 35, 0.6);
+  background: var(--bg-panel);
   backdrop-filter: blur(6px);
 }
 .repo-name { font-weight: 700; font-size: 14px; }
