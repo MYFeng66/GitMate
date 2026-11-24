@@ -1264,21 +1264,31 @@ function switchBranch(name) {
 }
 
 function mergeBranch(name) {
-  confirmModal('合并分支', `将「${name}」合并到当前分支「${state.currentBranch}」？`, async () => {
-    try {
-      await git(['merge', name]);
-      toast('合并成功', 'success');
-      refresh();
-    } catch (e) {
-      showModal({
-        title: '合并失败',
-        html: `可能存在冲突，请解决冲突后提交。<pre>${esc((e.raw && e.raw.err) || fmtGitErr(e))}</pre>`,
-        okText: '知道了',
-        onOk: null,
-      });
-      refresh();
-    }
+  showModalChoices({
+    title: '合并分支',
+    html: `将「${name}」合并到当前分支「${state.currentBranch}」：`,
+    choices: [
+      { label: '取消', cls: 'btn-ghost' },
+      { label: '快进合并', cls: 'btn-ghost', fn: () => doMerge(name, []) },
+      { label: '合并（--no-ff 生成合并记录）', cls: 'btn-primary', fn: () => doMerge(name, ['--no-ff']) },
+    ],
   });
+}
+
+async function doMerge(name, extraArgs) {
+  try {
+    await git(['merge', ...extraArgs, name]);
+    toast(extraArgs.length ? '合并成功（已生成合并提交）' : '合并成功', 'success');
+    refresh();
+  } catch (e) {
+    showModal({
+      title: '合并失败',
+      html: `可能存在冲突，请解决冲突后提交。<pre>${esc((e.raw && e.raw.err) || fmtGitErr(e))}</pre>`,
+      okText: '知道了',
+      onOk: null,
+    });
+    refresh();
+  }
 }
 
 function deleteBranch(name) {
