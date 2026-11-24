@@ -1619,6 +1619,7 @@ function bindEvents() {
 
   // 顶栏操作
   $('#refresh-btn').addEventListener('click', refresh);
+  $('#changes-refresh-btn').addEventListener('click', refresh);
   $('#settings-btn').addEventListener('click', openSettings);
   // 启动时应用已保存的主题
   applyTheme(localStorage.getItem('gm.theme') || 'dark');
