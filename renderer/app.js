@@ -1116,17 +1116,25 @@ function stashModal() {
     if (!lines.length) {
       html = '当前没有贮藏的内容。';
     } else {
-      html = '以下是你贮藏的改动（不属于任何分支），「取出并恢复」会把它应用到当前分支并删除该条；取出时若与当前分支冲突会提示：<div class="stash-list">' +
-        lines.map((line, i) => {
+      html = '以下是你贮藏的改动（不属于任何分支），「取出并恢复」会把它应用到当前分支并删除该条；取出时若与当前分支冲突会提示：'
+        + '<div class="stash-list" style="margin-top:8px">'
+        + lines.map((line, i) => {
           const end = line.indexOf('}');
           const ref = line.slice(0, end + 1);
           const msg = esc(line.slice(end + 2).trim());
-          return `<div class="stash-row"><span class="stash-msg">${i + 1}. ${msg}</span>` +
-            `<span><button class="fa-btn" data-ref="${esc(ref)}" data-act="pop">取出并恢复</button> ` +
-            `<button class="fa-btn danger" data-ref="${esc(ref)}" data-act="drop">删除</button></span></div>`;
-        }).join('') + '</div>';
+          return `<div class="stash-row"><span class="stash-msg">${i + 1}. ${msg}</span>`
+            + `<span><button class="fa-btn" data-ref="${esc(ref)}" data-act="pop">取出并恢复</button> `
+            + `<button class="fa-btn danger" data-ref="${esc(ref)}" data-act="drop">删除</button></span></div>`;
+        }).join('') + '</div>'
+        + '<div style="margin-top:10px"><button id="stash-refresh-btn" class="fa-btn">⟳ 刷新</button></div>';
     }
     showModal({ title: '贮藏的改动（stash）', html, okText: '关闭' });
+    const rb = document.querySelector('#stash-refresh-btn');
+    if (rb) rb.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hideModal();
+      refresh().then(() => stashModal());
+    });
     document.querySelectorAll('#modal-body .fa-btn').forEach((b) => {
       b.addEventListener('click', async () => {
         try {
