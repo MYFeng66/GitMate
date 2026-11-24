@@ -778,3 +778,21 @@ body.theme-light ::-webkit-scrollbar-thumb { background: #c9cdda; }
 body.theme-light ::-webkit-scrollbar-thumb:hover { background: #b4b9c9; }
 body.theme-light .dl-add { color: var(--green); }
 body.theme-light .dl-del { color: var(--red); }
+
+/* ---------- 终端/命令栏配色（跟随主题） ---------- */
+:root {
+  --term-bg: #12141c;
+  --term-cmd: #4dd4e8;
+  --term-action: #7ee787;
+  --term-out: #c8cbd8;
+}
+body.theme-light {
+  --term-bg: #ffffff;
+  --term-cmd: #0e7c9c;
+  --term-action: #1a7f37;
+  --term-out: #454a58;
+}
+#cmdbar { background: var(--term-bg); }
+.tl-cmd-user { color: var(--term-cmd); }
+.tl-cmd-action { color: var(--term-action); }
+.tl-out { color: var(--term-out); }

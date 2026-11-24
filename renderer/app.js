@@ -1196,8 +1196,9 @@ const SETTINGS_MENU = [
   { label: 'ℹ️ 关于 GitMate', action: showAbout },
 ];
 
-// 点 ⚙：锚定按钮弹出小菜单，罗列所有设置项
-function openSettings() {
+// 点 ⚙：锚定按钮弹出小菜单，罗列所有设置项（stopPropagation 防止冒泡到 document 的全局点击关闭监听）
+function openSettings(e) {
+  e.stopPropagation();
   const r = $('#settings-btn').getBoundingClientRect();
   showCtxMenu(r.left - 130, r.bottom + 8, SETTINGS_MENU.map((s) => ({
     label: s.label,
@@ -1232,7 +1233,7 @@ function openThemeSettings() {
           <button type="button" data-theme="dark" class="${cur === 'dark' ? 'sel' : ''}">🌙 深色</button>
           <button type="button" data-theme="light" class="${cur === 'light' ? 'sel' : ''}">☀️ 浅色</button>
         </div>
-        <div class="setting-hint">点击即时生效，选择会记住，下次启动保持不变。终端区域保持深色控制台风格。</div>
+        <div class="setting-hint">点击即时生效，选择会记住，下次启动保持不变。终端配色跟随主题。</div>
       </div>`,
   });
   $('#theme-opts').addEventListener('click', (e) => {
