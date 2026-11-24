@@ -711,7 +711,7 @@ function buildGraphRows(commits) {
       const to = colMap[e.to];
       inner += curve(cx(dotCol), ROW_H / 2, cx(to), ROW_H, mapped[e.to].color);
     }
-    inner += `<circle cx="${cx(dotCol)}" cy="${ROW_H / 2}" r="4.5" fill="${dotColor}" stroke="#0e1016" stroke-width="1.5"/>`;
+    inner += `<circle cx="${cx(dotCol)}" cy="${ROW_H / 2}" r="4.5" fill="${dotColor}" style="stroke:var(--bg)" stroke-width="1.5"/>`;
 
     const svg = `<svg width="${width}" height="${ROW_H}" viewBox="0 0 ${width} ${ROW_H}" style="flex-shrink:0;display:block;overflow:visible">${inner}</svg>`;
     rows.push({ type: 'commit', svg, commit: c });
@@ -1184,6 +1184,35 @@ function createBranchFrom(base) {
   });
 }
 
+// ---------- 设置：个性化主题 ----------
+function applyTheme(t) {
+  document.body.classList.toggle('theme-light', t === 'light');
+  localStorage.setItem('gm.theme', t);
+}
+
+function openSettings() {
+  const cur = localStorage.getItem('gm.theme') || 'dark';
+  showModal({
+    title: '设置',
+    okText: '完成',
+    html: `
+      <div class="setting-group">
+        <div class="setting-label">个性化 · 主题</div>
+        <div class="theme-opts" id="theme-opts">
+          <button type="button" data-theme="dark" class="${cur === 'dark' ? 'sel' : ''}">🌙 深色</button>
+          <button type="button" data-theme="light" class="${cur === 'light' ? 'sel' : ''}">☀️ 浅色</button>
+        </div>
+        <div class="setting-hint">点击即时生效，选择会记住，下次启动保持不变。终端区域保持深色控制台风格。</div>
+      </div>`,
+  });
+  $('#theme-opts').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-theme]');
+    if (!b) return;
+    applyTheme(b.dataset.theme);
+    document.querySelectorAll('#theme-opts button').forEach((x) => x.classList.toggle('sel', x === b));
+  });
+}
+
 function switchBranch(name) {
   guardThen(async () => {
     try {
@@ -1532,6 +1561,9 @@ function bindEvents() {
 
   // 顶栏操作
   $('#refresh-btn').addEventListener('click', refresh);
+  $('#settings-btn').addEventListener('click', openSettings);
+  // 启动时应用已保存的主题
+  applyTheme(localStorage.getItem('gm.theme') || 'dark');
   $('#push-btn').addEventListener('click', doPush);
   $('#pull-btn').addEventListener('click', doPull);
 
