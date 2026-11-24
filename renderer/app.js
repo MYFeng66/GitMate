@@ -1184,20 +1184,50 @@ function createBranchFrom(base) {
   });
 }
 
-// ---------- 设置：个性化主题 ----------
+// ---------- 设置：入口菜单 + 个性化主题 ----------
 function applyTheme(t) {
   document.body.classList.toggle('theme-light', t === 'light');
   localStorage.setItem('gm.theme', t);
 }
 
+// 设置项清单：以后加新设置就在这里加一行（label + action）
+const SETTINGS_MENU = [
+  { label: '🎨 个性化 · 主题', action: openThemeSettings },
+  { label: 'ℹ️ 关于 GitMate', action: showAbout },
+];
+
+// 点 ⚙：锚定按钮弹出小菜单，罗列所有设置项
 function openSettings() {
+  const r = $('#settings-btn').getBoundingClientRect();
+  showCtxMenu(r.left - 130, r.bottom + 8, SETTINGS_MENU.map((s) => ({
+    label: s.label,
+    action: () => s.action(),
+  })));
+}
+
+// 关于
+function showAbout() {
+  showModal({
+    title: '关于 GitMate',
+    okText: '关闭',
+    html: `
+      <div class="setting-group" style="text-align:center;padding:16px 0">
+        <div style="font-size:15px;font-weight:600">GitMate</div>
+        <div style="margin-top:6px;color:var(--text-dim);font-size:12px">简单好用的 Git 桌面管理工具</div>
+        <div style="margin-top:14px;color:var(--text-faint);font-size:12px">github.com/MYFeng66/GitMate</div>
+      </div>`,
+  });
+}
+
+// 个性化 · 主题
+function openThemeSettings() {
   const cur = localStorage.getItem('gm.theme') || 'dark';
   showModal({
-    title: '设置',
+    title: '设置 · 个性化',
     okText: '完成',
     html: `
       <div class="setting-group">
-        <div class="setting-label">个性化 · 主题</div>
+        <div class="setting-label">主题</div>
         <div class="theme-opts" id="theme-opts">
           <button type="button" data-theme="dark" class="${cur === 'dark' ? 'sel' : ''}">🌙 深色</button>
           <button type="button" data-theme="light" class="${cur === 'light' ? 'sel' : ''}">☀️ 浅色</button>
