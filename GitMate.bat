@@ -1,3 +1,3 @@
 @echo off
-cd /d %~dp0
-start "" "%~dp0node_modules\.bin\electron.cmd" .
+rem 直接启动 electron.exe（GUI 程序，无控制台窗口）
+start "" "%~dp0node_modules\electron\dist\electron.exe" "%~dp0."

@@ -486,6 +486,15 @@ function makeChangeRow(f, staged) {
   return row;
 }
 
+// 标记冲突文件为已解决（git add，之后回到正常暂存/提交流程）
+async function resolveConflict(f) {
+  try {
+    await git(['add', '--', f.path]);
+    toast(`已标记 ${f.path} 为已解决，记得提交`, 'success');
+    await refresh();
+  } catch (e) { toast(fmtGitErr(e), 'error'); }
+}
+
 async function toggleCheck(f, checked) {
   try {
     if (checked) await git(['add', '--', f.path]);
