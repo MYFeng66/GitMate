@@ -799,3 +799,6 @@ body.theme-light {
 
 /* 贮藏弹窗：存入行 */
 .stash-store { display: flex; gap: 8px; align-items: center; }
+
+/* 贮藏/跳过区行内按钮：等宽对称 */
+.stash-row .fa-btn { min-width: 76px; }

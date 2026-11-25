@@ -1196,8 +1196,8 @@ async function stashModal() {
         const ref = line.slice(0, end + 1);
         const msg = esc(line.slice(end + 2).trim());
         return `<div class="stash-row"><span class="stash-msg">${i + 1}. ${msg}</span>`
-          + `<span><button class="fa-btn" data-ref="${esc(ref)}" data-act="pop">取出并恢复</button> `
-          + `<button class="fa-btn" data-ref="${esc(ref)}" data-act="force" title="补丁打不上时用：从贮藏把整个文件覆盖回工作区">强制取出（覆盖）</button> `
+          + `<span><button class="fa-btn" data-ref="${esc(ref)}" data-act="pop">取出</button>`
+          + `<button class="fa-btn" data-ref="${esc(ref)}" data-act="force" title="补丁打不上时用：从贮藏把整个文件覆盖回工作区">覆盖取出</button>`
           + `<button class="fa-btn danger" data-ref="${esc(ref)}" data-act="drop">删除</button></span></div>`;
       }).join('') + '</div>'
     : '当前没有贮藏的内容。';
