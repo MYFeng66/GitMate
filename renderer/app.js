@@ -155,9 +155,11 @@ function setModalActions(choices) {
     box.appendChild(b);
   }
 }
-function showModal({ title, html, okText = '确定', danger = false, onOk }) {
+function showModal({ title, html, okText = '确定', danger = false, onOk, wide = false }) {
   $('#modal-title').textContent = title;
   $('#modal-body').innerHTML = html;
+  $('#modal').classList.toggle('wide', wide);
+  $('#modal').classList.add('resizable');
   setModalActions([
     { label: '取消', cls: 'btn-ghost' },
     { label: okText, cls: danger ? 'btn-danger' : 'btn-primary', fn: onOk },
@@ -1182,6 +1184,7 @@ async function stashModal() {
   showModal({
     title: '贮藏的改动（stash）',
     okText: '关闭',
+    wide: true,
     html: (storable.length
       ? `<div style="color:var(--text-dim);font-size:12px;margin-bottom:6px">选择要贮藏的文件（改动区/提交区）：`
         + `<button id="stash-sel-all" class="fa-btn" style="margin-left:6px">全选</button>`
@@ -1288,7 +1291,7 @@ function skipModal() {
           + `<span><button class="fa-btn" data-path="${esc(p)}" data-act="unskip">移出跳过区</button></span></div>`).join('')
         + '</div>'
       : '跳过区为空。在改动区右键文件 →「加入跳过区」即可把个人配置（如 settings.xml）放进来，之后它的本地改动不再出现。';
-    showModal({ title: '跳过区（个人配置，不提交）', html: body, okText: '关闭' });
+    showModal({ title: '跳过区（个人配置，不提交）', html: body, okText: '关闭', wide: true });
     document.querySelectorAll('#modal-body .fa-btn[data-act="unskip"]').forEach((b) => {
       b.addEventListener('click', async () => {
         try {
