@@ -269,7 +269,7 @@ function renderSidebarRepos() {
   box.appendChild(el('div', 'rr-title', ' 仓库列表'));
   for (const r of state.repos.slice(0, 6)) {
     const active = state.repo && r.path === state.repo.path;
-    const b = el('button', 'sb-repo-item' + (active ? ' active' : ''), (active ? '⭐ ' : '') + r.name);
+    const b = el('button', 'sb-repo-item' + (active ? ' active' : ''), (active ? '📌 ' : '') + r.name);
     b.title = r.path;
     b.addEventListener('click', () => openRepoPath(r.path));
     b.addEventListener('contextmenu', (e) => {
@@ -283,10 +283,10 @@ function renderSidebarRepos() {
 // 仓库右键菜单
 function repoCtxItems(r) {
   return [
-    { label: '⭐ 打开此仓库', action: () => openRepoPath(r.path) },
+    { label: '📂 打开此仓库', action: () => openRepoPath(r.path) },
     { label: '📄 查看 .gitignore', action: () => showGitignore(r.path) },
-    { label: '📂 在资源管理器中显示', action: () => window.gitmate.showInFolder(r.path) },
-    { label: '❯ 在终端中打开', action: async () => {
+    { label: '📁 在资源管理器中显示', action: () => window.gitmate.showInFolder(r.path) },
+    { label: '💻 在终端中打开', action: async () => {
         const res = await window.gitmate.openTerminal(r.path);
         if (!res.ok) toast('打开终端失败：' + (res.error || ''), 'error');
       } },
@@ -294,7 +294,7 @@ function repoCtxItems(r) {
         try { await navigator.clipboard.writeText(r.path); toast('路径已复制', 'success'); }
         catch { toast('复制失败', 'error'); }
       } },
-    { label: '✕ 从列表移除', danger: true, action: () => {
+    { label: '🗑 从列表移除', danger: true, action: () => {
         state.repos = state.repos.filter((x) => x.path !== r.path);
         saveRepos();
         renderSidebarRepos();
@@ -480,7 +480,7 @@ function makeChangeRow(f, staged) {
 
   // 冲突文件：解决后点「标记已解决」（git add），然后正常勾选提交
   if (f.conflict && !staged) {
-    const rb = el('button', 'fa-btn', '✔ 标记已解决');
+    const rb = el('button', 'fa-btn', '✅ 标记已解决');
     rb.title = '编辑文件处理好冲突后，点此将文件标记为已解决（git add）';
     rb.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -553,7 +553,7 @@ async function toggleCheck(f, checked) {
 function fileCtxItems(f) {
   const items = [];
   if (f.conflict) {
-    items.push({ label: '✔ 标记已解决（git add）', action: () => resolveConflict(f) });
+    items.push({ label: '✅ 标记已解决（git add）', action: () => resolveConflict(f) });
     items.push({ label: '📋 复制文件', action: () => copyFileToClipboard(f) });
     items.push({ label: '在资源管理器中显示', action: () => window.gitmate.showInFolder(state.repo.path + '\\' + f.path.replace(/\//g, '\\')) });
     return items;
@@ -562,7 +562,7 @@ function fileCtxItems(f) {
   items.push({ label: '📋 复制文件', action: () => copyFileToClipboard(f) });
   items.push({ label: '🙈 加入跳过区（个人配置，不再显示/提交）', action: () => addToSkipZone(f) });
   items.push({
-    label: f.untracked ? '✕ 删除此新文件…' : '✕ 丢弃更改…',
+    label: f.untracked ? '🗑 删除此新文件…' : '🗑 丢弃更改…',
     danger: true,
     action: () => discardFile(f),
   });
@@ -1333,20 +1333,20 @@ async function updateStashBadge() {
 // 分支右键菜单：本地分支
 function localBranchCtxItems(b) {
   const items = [];
-  if (!b.current) items.push({ label: '⑂ 切换到此分支', action: () => switchBranch(b.name) });
-  items.push({ label: '＋ 从此分支建立新分支…', action: () => createBranchFrom(b.name) });
-  items.push({ label: '⇉ 合并到当前分支', action: () => mergeBranch(b.name) });
-  if (!b.current) items.push({ label: '✕ 删除分支…', danger: true, action: () => deleteBranch(b.name) });
+  if (!b.current) items.push({ label: '🌿 切换到此分支', action: () => switchBranch(b.name) });
+  items.push({ label: '🌱 从此分支建立新分支…', action: () => createBranchFrom(b.name) });
+  items.push({ label: '🔀 合并到当前分支', action: () => mergeBranch(b.name) });
+  if (!b.current) items.push({ label: '🗑 删除分支…', danger: true, action: () => deleteBranch(b.name) });
   return items;
 }
 
 // 分支右键菜单：远程分支
 function remoteBranchCtxItems(name, checkedOut) {
   const items = [];
-  if (!checkedOut) items.push({ label: '⑂ 检出为新本地分支', action: () => checkoutRemote(name) });
-  items.push({ label: '＋ 从此分支建立新分支…', action: () => createBranchFrom(name) });
-  items.push({ label: '⇉ 合并到当前分支', action: () => mergeBranch(name) });
-  items.push({ label: '✕ 删除远程分支…', danger: true, action: () => deleteRemoteBranch(name) });
+  if (!checkedOut) items.push({ label: '🌿 检出为新本地分支', action: () => checkoutRemote(name) });
+  items.push({ label: '🌱 从此分支建立新分支…', action: () => createBranchFrom(name) });
+  items.push({ label: '🔀 合并到当前分支', action: () => mergeBranch(name) });
+  items.push({ label: '🗑 删除远程分支…', danger: true, action: () => deleteRemoteBranch(name) });
   return items;
 }
 
