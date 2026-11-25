@@ -1197,6 +1197,7 @@ async function stashModal() {
         const msg = esc(line.slice(end + 2).trim());
         return `<div class="stash-row"><span class="stash-msg">${i + 1}. ${msg}</span>`
           + `<span><button class="fa-btn" data-ref="${esc(ref)}" data-act="pop">取出并恢复</button> `
+          + `<button class="fa-btn" data-ref="${esc(ref)}" data-act="force" title="补丁打不上时用：从贮藏把整个文件覆盖回工作区">强制取出（覆盖）</button> `
           + `<button class="fa-btn danger" data-ref="${esc(ref)}" data-act="drop">删除</button></span></div>`;
       }).join('') + '</div>'
     : '当前没有贮藏的内容。';
@@ -1246,12 +1247,27 @@ async function stashModal() {
         if (b.dataset.act === 'pop') {
           await git(['stash', 'pop', b.dataset.ref]);
           toast('已取出贮藏的改动，恢复到工作区', 'success');
+          hideModal();
+          refresh();
+        } else if (b.dataset.act === 'force') {
+          // 整文件覆盖取出：绕过补丁合并（适用于贮藏基点与当前分支分岐/EOL 差异导致 patch 打不上）
+          confirmModal('强制取出', `将把该贮藏里的文件整体覆盖回工作区（当前同名文件会被覆盖）。确定继续？`, async () => {
+            try {
+              const fr = await git(['stash', 'show', '--name-only', b.dataset.ref]);
+              const paths = fr.out.split('\n').map((s) => s.trim()).filter(Boolean);
+              for (const p of paths) await git(['checkout', b.dataset.ref, '--', p]);
+              await git(['stash', 'drop', b.dataset.ref]);
+              toast(`已强制取出 ${paths.length} 个文件（贮藏已删除）`, 'success');
+              hideModal();
+              refresh();
+            } catch (e) { toast(fmtGitErr(e), 'error'); }
+          });
         } else {
           await git(['stash', 'drop', b.dataset.ref]);
           toast('已删除该条贮藏', 'success');
+          hideModal();
+          refresh();
         }
-        hideModal();
-        refresh();
       } catch (e) { toast(fmtGitErr(e), 'error'); }
     });
   });
