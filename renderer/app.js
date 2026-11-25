@@ -1210,11 +1210,31 @@ async function stashModal() {
   showModal({
     title: '贮藏的改动（stash）',
     okText: '关闭',
-    html: `<div style="display:flex;gap:16px;align-items:stretch">
-        <div style="flex:1;min-width:0">${pickCol}</div>
-        <div style="width:1px;background:var(--border)"></div>
-        <div style="flex:1;min-width:0">${listHtml}</div>
-      </div>`,
+    html: (storable.length
+      ? `<div style="color:var(--text-dim);font-size:12px;margin-bottom:6px">选择要贮藏的文件（改动区/提交区）：`
+        + `<button id="stash-sel-all" class="fa-btn" style="margin-left:6px">全选</button>`
+        + `<button id="stash-sel-none" class="fa-btn" style="margin-left:4px">全不选</button></div>`
+        + `<div class="stash-list" style="max-height:200px;overflow-y:auto">${fileRows}</div>`
+        + `<input id="stash-msg-input" placeholder="贮藏说明（可选）"`
+        + `style="width:100%;margin-top:10px;padding:7px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg-hover);color:var(--text);font-size:12.5px;box-sizing:border-box">`
+        + `<div style="margin-top:10px;display:flex;gap:8px">
+             <button id="stash-push-btn" class="btn-mini" style="flex:1">📦 存入贮藏</button>
+             <button id="stash-refresh-btn" class="btn-mini" title="重新检查文件与贮藏列表">⟳ 刷新</button>
+           </div>`
+      : '<div class="setting-hint">当前没有可贮藏的改动（冲突文件不会存入）。</div>')
+      + `<div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--border);color:var(--text-dim);font-size:12px;margin-bottom:6px">贮藏记录：</div>`
+      + (lines.length
+        ? `<div class="stash-list" style="max-height:200px;overflow-y:auto">`
+          + lines.map((line, i) => {
+            const end = line.indexOf('}');
+            const ref = line.slice(0, end + 1);
+            const msg = esc(line.slice(end + 2).trim());
+            return `<div class="stash-row"><span class="stash-msg">${i + 1}. ${msg}</span>`
+              + `<span><button class="fa-btn" data-ref="${esc(ref)}" data-act="pop">取出</button>`
+              + `<button class="fa-btn" data-ref="${esc(ref)}" data-act="force" title="补丁打不上时用：从贮藏把整个文件覆盖回工作区">覆盖取出</button>`
+              + `<button class="fa-btn danger" data-ref="${esc(ref)}" data-act="drop">删除</button></span></div>`;
+          }).join('') + '</div>'
+        : '<div class="setting-hint">还没有贮藏记录。</div>'),
   });
   const selBox = document.querySelector('#stash-sel-all');
   if (selBox) selBox.addEventListener('click', (e) => {
