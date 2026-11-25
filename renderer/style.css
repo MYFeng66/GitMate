@@ -796,3 +796,6 @@ body.theme-light {
 .tl-cmd-user { color: var(--term-cmd); }
 .tl-cmd-action { color: var(--term-action); }
 .tl-out { color: var(--term-out); }
+
+/* 贮藏弹窗：存入行 */
+.stash-store { display: flex; gap: 8px; align-items: center; }

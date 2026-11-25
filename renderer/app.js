@@ -557,6 +557,8 @@ function fileCtxItems(f) {
     return items;
   }
   items.push({ label: '📋 复制文件', action: () => copyFileToClipboard(f) });
+  items.push({ label: '📋 复制文件', action: () => copyFileToClipboard(f) });
+  items.push({ label: '🙈 加入跳过区（个人配置，不再显示/提交）', action: () => addToSkipZone(f) });
   items.push({
     label: f.untracked ? '✕ 删除此新文件…' : '✕ 丢弃更改…',
     danger: true,
@@ -1158,48 +1160,111 @@ async function stashThenSwitch(branchName) {
 }
 
 // 贮藏管理：列出所有 stash，可取出（pop）/删除（drop）
-function stashModal() {
-  git(['stash', 'list']).then((r) => {
-    const lines = r.out.split('\n').filter((s) => s.startsWith('stash@{'));
-    let html;
-    if (!lines.length) {
-      html = '当前没有贮藏的内容。';
-    } else {
-      html = '以下是你贮藏的改动（不属于任何分支），「取出并恢复」会把它应用到当前分支并删除该条；取出时若与当前分支冲突会提示：'
-        + '<div class="stash-list" style="margin-top:8px">'
-        + lines.map((line, i) => {
-          const end = line.indexOf('}');
-          const ref = line.slice(0, end + 1);
-          const msg = esc(line.slice(end + 2).trim());
-          return `<div class="stash-row"><span class="stash-msg">${i + 1}. ${msg}</span>`
-            + `<span><button class="fa-btn" data-ref="${esc(ref)}" data-act="pop">取出并恢复</button> `
-            + `<button class="fa-btn danger" data-ref="${esc(ref)}" data-act="drop">删除</button></span></div>`;
-        }).join('') + '</div>'
-        + '<div style="margin-top:10px"><button id="stash-refresh-btn" class="fa-btn">⟳ 刷新</button></div>';
-    }
-    showModal({ title: '贮藏的改动（stash）', html, okText: '关闭' });
-    const rb = document.querySelector('#stash-refresh-btn');
-    if (rb) rb.addEventListener('click', (e) => {
-      e.stopPropagation();
+// 贮藏弹窗：存（push）取（pop）一体
+async function stashModal() {
+  let lines = [];
+  try {
+    const r = await git(['stash', 'list']);
+    lines = r.out.split('\n').filter((s) => s.startsWith('stash@{'));
+  } catch (e) { toast(fmtGitErr(e), 'error'); return; }
+
+  const hasChanges = state.status && state.status.files.some((f) => !f.conflict);
+  const listHtml = lines.length
+    ? '以下贮藏的改动不属于任何分支，「取出并恢复」会应用到当前分支并删除该条；若与当前分支冲突会提示：'
+      + '<div class="stash-list" style="margin-top:8px">'
+      + lines.map((line, i) => {
+        const end = line.indexOf('}');
+        const ref = line.slice(0, end + 1);
+        const msg = esc(line.slice(end + 2).trim());
+        return `<div class="stash-row"><span class="stash-msg">${i + 1}. ${msg}</span>`
+          + `<span><button class="fa-btn" data-ref="${esc(ref)}" data-act="pop">取出并恢复</button> `
+          + `<button class="fa-btn danger" data-ref="${esc(ref)}" data-act="drop">删除</button></span></div>`;
+      }).join('') + '</div>'
+    : '当前没有贮藏的内容。';
+
+  showModal({
+    title: '贮藏的改动（stash）',
+    okText: '关闭',
+    html: `<div class="stash-store">
+        <input id="stash-msg-input" placeholder="贮藏说明（可选，例如：切分支前的个人配置）"
+          style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg-hover);color:var(--text);font-size:12.5px">
+        <button id="stash-push-btn" class="btn-mini">存入贮藏</button>
+      </div>`
+      + (hasChanges ? '' : '<div class="setting-hint" style="margin-top:4px">当前没有可贮藏的改动（冲突文件不会存入）。</div>')
+      + `<div style="margin-top:14px">${listHtml}</div>`
+      + '<div style="margin-top:10px"><button id="stash-refresh-btn" class="fa-btn">⟳ 刷新</button></div>',
+  });
+  const push = async () => {
+    const msg = $('#stash-msg-input').value.trim() || '贮藏改动';
+    try {
+      await git(['stash', 'push', '-m', msg]);
+      toast('已存入贮藏：' + msg, 'success');
       hideModal();
-      refresh().then(() => stashModal());
+      refresh();
+    } catch (e) { toast(fmtGitErr(e), 'error'); }
+  };
+  $('#stash-push-btn').addEventListener('click', (e) => { e.stopPropagation(); push(); });
+  $('#stash-msg-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') push(); });
+  const rb = document.querySelector('#stash-refresh-btn');
+  if (rb) rb.addEventListener('click', (e) => {
+    e.stopPropagation();
+    hideModal();
+    refresh().then(() => stashModal());
+  });
+  document.querySelectorAll('#modal-body .fa-btn[data-act]').forEach((b) => {
+    b.addEventListener('click', async () => {
+      try {
+        if (b.dataset.act === 'pop') {
+          await git(['stash', 'pop', b.dataset.ref]);
+          toast('已取出贮藏的改动，恢复到工作区', 'success');
+        } else {
+          await git(['stash', 'drop', b.dataset.ref]);
+          toast('已删除该条贮藏', 'success');
+        }
+        hideModal();
+        refresh();
+      } catch (e) { toast(fmtGitErr(e), 'error'); }
     });
-    document.querySelectorAll('#modal-body .fa-btn').forEach((b) => {
+  });
+}
+
+// ---------- 跳过区（skip-worktree）：个人配置文件不再出现在改动区 ----------
+async function listSkipped() {
+  const r = await git(['ls-files', '-v']);
+  return r.out.split('\n').filter((l) => l.startsWith('S ')).map((l) => l.slice(2));
+}
+
+function skipModal() {
+  listSkipped().then((files) => {
+    const body = files.length
+      ? '以下文件已加入跳过区，本地改动不再显示在改动区、也不会被提交。注意：远程对这些文件的更新也不会提醒。'
+        + '<div class="stash-list" style="margin-top:8px">'
+        + files.map((p, i) =>
+          `<div class="stash-row"><span class="stash-msg">${i + 1}. ${esc(p)}</span>`
+          + `<span><button class="fa-btn" data-path="${esc(p)}" data-act="unskip">移出跳过区</button></span></div>`).join('')
+        + '</div>'
+      : '跳过区为空。在改动区右键文件 →「加入跳过区」即可把个人配置（如 settings.xml）放进来，之后它的本地改动不再出现。';
+    showModal({ title: '跳过区（个人配置，不提交）', html: body, okText: '关闭' });
+    document.querySelectorAll('#modal-body .fa-btn[data-act="unskip"]').forEach((b) => {
       b.addEventListener('click', async () => {
         try {
-          if (b.dataset.act === 'pop') {
-            await git(['stash', 'pop', b.dataset.ref]);
-            toast('已取出贮藏的改动，恢复到工作区', 'success');
-          } else {
-            await git(['stash', 'drop', b.dataset.ref]);
-            toast('已删除该条贮藏', 'success');
-          }
+          await git(['update-index', '--no-skip-worktree', '--', b.dataset.path]);
+          toast('已移出跳过区', 'success');
           hideModal();
           refresh();
         } catch (e) { toast(fmtGitErr(e), 'error'); }
       });
     });
   }).catch((e) => toast(fmtGitErr(e), 'error'));
+}
+
+async function addToSkipZone(f) {
+  try {
+    if (f.conflict) { toast('冲突文件请先解决再加入跳过区', 'error'); return; }
+    await git(['update-index', '--skip-worktree', '--', f.path]);
+    toast(`已加入跳过区：${f.path}（可在 ⚙ → 跳过区管理 恢复）`, 'success');
+    refresh();
+  } catch (e) { toast(fmtGitErr(e), 'error'); }
 }
 
 // 顶栏贮藏徽章：有未取出的 stash 时醒目显示
@@ -1259,6 +1324,7 @@ function applyTheme(t) {
 // 设置项清单：以后加新设置就在这里加一行（label + action）
 const SETTINGS_MENU = [
   { label: '🎨 个性化 · 主题', action: openThemeSettings },
+  { label: '🙈 跳过区管理（个人配置）', action: skipModal },
   { label: 'ℹ️ 关于 GitMate', action: showAbout },
 ];
 
@@ -1783,6 +1849,7 @@ function bindEvents() {
 
   // 贮藏徽章
   $('#stash-badge').addEventListener('click', stashModal);
+  $('#stash-btn').addEventListener('click', stashModal);
 
   // 全局
   document.addEventListener('click', () => hideCtxMenu());
