@@ -1168,7 +1168,26 @@ async function stashModal() {
     lines = r.out.split('\n').filter((s) => s.startsWith('stash@{'));
   } catch (e) { toast(fmtGitErr(e), 'error'); return; }
 
-  const hasChanges = state.status && state.status.files.some((f) => !f.conflict);
+  const storable = (state.status ? state.status.files : []).filter((f) => !f.conflict);
+  const zoneTag = (f) => {
+    const st = f.x !== ' ' && f.y !== ' ' ? '改动+提交' : (f.x !== ' ' ? '提交区' : '改动区');
+    return `<span class="tag" style="margin-left:6px">${st}</span>`;
+  };
+  const fileRows = storable.map((f) =>
+    `<label class="stash-row" style="cursor:pointer">`
+      + `<input type="checkbox" class="stash-sel" value="${esc(f.path)}" checked>`
+      + `<span class="stash-msg">${esc(f.origPath ? f.origPath + ' → ' + f.path : f.path)}${zoneTag(f)}</span></label>`).join('');
+  const pickHtml = storable.length
+    ? '<div style="margin-bottom:6px;color:var(--text-dim);font-size:12px">选择要贮藏的文件（改动区/提交区都在这里）：'
+      + `<button id="stash-sel-all" class="fa-btn" style="margin-left:6px">全选</button>`
+      + `<button id="stash-sel-none" class="fa-btn" style="margin-left:4px">全不选</button></div>`
+      + `<div class="stash-list" style="max-height:180px;overflow-y:auto">${fileRows}</div>`
+      + `<div class="stash-store" style="margin-top:10px">`
+      + `<input id="stash-msg-input" placeholder="贮藏说明（可选，例如：切分支前的个人配置）"`
+      + `style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg-hover);color:var(--text);font-size:12.5px">`
+      + `<button id="stash-push-btn" class="btn-mini">存入贮藏</button></div>`
+    : '当前没有可贮藏的改动（冲突文件不会存入）。';
+
   const listHtml = lines.length
     ? '以下贮藏的改动不属于任何分支，「取出并恢复」会应用到当前分支并删除该条；若与当前分支冲突会提示：'
       + '<div class="stash-list" style="margin-top:8px">'
@@ -1185,20 +1204,30 @@ async function stashModal() {
   showModal({
     title: '贮藏的改动（stash）',
     okText: '关闭',
-    html: `<div class="stash-store">
-        <input id="stash-msg-input" placeholder="贮藏说明（可选，例如：切分支前的个人配置）"
-          style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg-hover);color:var(--text);font-size:12.5px">
-        <button id="stash-push-btn" class="btn-mini">存入贮藏</button>
-      </div>`
-      + (hasChanges ? '' : '<div class="setting-hint" style="margin-top:4px">当前没有可贮藏的改动（冲突文件不会存入）。</div>')
+    html: `<div style="margin-bottom:6px">${pickHtml}</div>`
       + `<div style="margin-top:14px">${listHtml}</div>`
       + '<div style="margin-top:10px"><button id="stash-refresh-btn" class="fa-btn">⟳ 刷新</button></div>',
   });
+  const selBox = document.querySelector('#stash-sel-all');
+  if (selBox) selBox.addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.querySelectorAll('.stash-sel').forEach((c) => { c.checked = true; });
+  });
+  const selNone = document.querySelector('#stash-sel-none');
+  if (selNone) selNone.addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.querySelectorAll('.stash-sel').forEach((c) => { c.checked = false; });
+  });
   const push = async () => {
+    const paths = [...document.querySelectorAll('.stash-sel:checked')].map((c) => c.value);
+    if (!paths.length) { toast('请先勾选要贮藏的文件', 'error'); return; }
     const msg = $('#stash-msg-input').value.trim() || '贮藏改动';
+    const hasUntracked = paths.some((p) => { const f = storable.find((x) => x.path === p); return f && f.untracked; });
     try {
-      await git(['stash', 'push', '-m', msg]);
-      toast('已存入贮藏：' + msg, 'success');
+      await git(hasUntracked
+        ? ['stash', 'push', '-u', '-m', msg, '--', ...paths]
+        : ['stash', 'push', '-m', msg, '--', ...paths]);
+      toast(`已贮藏 ${paths.length} 个文件：${msg}`, 'success');
       hideModal();
       refresh();
     } catch (e) { toast(fmtGitErr(e), 'error'); }
