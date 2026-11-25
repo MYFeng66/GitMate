@@ -1878,7 +1878,7 @@ function bindEvents() {
 
   // 贮藏徽章
   $('#stash-badge').addEventListener('click', stashModal);
-  $('#stash-btn').addEventListener('click', stashModal);
+  $('#stash-top-btn').addEventListener('click', stashModal);
 
   // 全局
   document.addEventListener('click', () => hideCtxMenu());
