@@ -200,6 +200,21 @@ ipcMain.handle('term-run', (_e, { repo, cmdline, timeout }) => {
   return enqueueBash(repo, cmdline, timeout || 60000);
 });
 
+// .gitignore 读取/保存（content 传了=写，不传=读）
+ipcMain.handle('ignore-file', (_e, { repo, content }) => {
+  try {
+    const file = path.join(repo, '.gitignore');
+    if (content === undefined) {
+      const text = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+      return { ok: true, exists: fs.existsSync(file), content: text };
+    }
+    fs.writeFileSync(file, content, 'utf8');
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+
 // 把文件复制到系统剪贴板（可在资源管理器/聊天窗口粘贴）
 ipcMain.handle('copy-file', (_e, absPath) => {
   try {

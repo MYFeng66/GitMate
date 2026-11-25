@@ -282,6 +282,7 @@ function renderSidebarRepos() {
 function repoCtxItems(r) {
   return [
     { label: '⭐ 打开此仓库', action: () => openRepoPath(r.path) },
+    { label: '📄 查看 .gitignore', action: () => showGitignore(r.path) },
     { label: '📂 在资源管理器中显示', action: () => window.gitmate.showInFolder(r.path) },
     { label: '❯ 在终端中打开', action: async () => {
         const res = await window.gitmate.openTerminal(r.path);
@@ -505,6 +506,26 @@ async function resolveConflict(f) {
     toast(`已标记 ${f.path} 为已解决，记得提交`, 'success');
     await refresh();
   } catch (e) { toast(fmtGitErr(e), 'error'); }
+}
+
+// .gitignore 查看/编辑弹窗
+async function showGitignore(repoPath) {
+  const r = await window.gitmate.ignoreFile(repoPath);
+  if (!r || !r.ok) { toast('读取 .gitignore 失败：' + ((r && r.error) || ''), 'error'); return; }
+  const hint = r.exists ? '' : '<div class="setting-hint">该仓库还没有 .gitignore，保存后将创建。</div>';
+  showModal({
+    title: '.gitignore',
+    okText: '关闭',
+    html: `${hint}<textarea id="gi-text" spellcheck="false" style="width:100%;min-height:300px;font-family:var(--mono);font-size:12px;line-height:1.6;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px;resize:vertical">${esc(r.content)}</textarea>`,
+  });
+  setModalActions([
+    { label: '关闭', cls: 'btn-ghost' },
+    { label: '保存', cls: 'btn-primary', fn: async () => {
+        const w = await window.gitmate.ignoreFile(repoPath, $('#gi-text').value);
+        if (w && w.ok) toast('已保存 .gitignore', 'success');
+        else toast('保存失败：' + ((w && w.error) || ''), 'error');
+      } },
+  ]);
 }
 
 // 复制文件到系统剪贴板（资源管理器/聊天工具可直接粘贴）

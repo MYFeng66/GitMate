@@ -23,4 +23,6 @@ contextBridge.exposeInMainWorld('gitmate', {
   openTerminal: (repoPath) => ipcRenderer.invoke('open-terminal', repoPath),
   // 复制文件到系统剪贴板
   copyFile: (absPath) => ipcRenderer.invoke('copy-file', absPath),
+  // .gitignore 读取（content 不传） / 保存（content 传入）
+  ignoreFile: (repo, content) => ipcRenderer.invoke('ignore-file', { repo, content }),
 });
