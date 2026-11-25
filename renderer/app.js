@@ -475,6 +475,17 @@ function makeChangeRow(f, staged) {
   row.appendChild(name);
   row.appendChild(st);
 
+  // 冲突文件：解决后点「标记已解决」（git add），然后正常勾选提交
+  if (f.conflict && !staged) {
+    const rb = el('button', 'fa-btn', '✔ 标记已解决');
+    rb.title = '编辑文件处理好冲突后，点此将文件标记为已解决（git add）';
+    rb.addEventListener('click', (e) => {
+      e.stopPropagation();
+      resolveConflict(f);
+    });
+    row.appendChild(rb);
+  }
+
   row.addEventListener('click', () => {
     state.selectedFile = { path: f.path };
     highlightSelection();
@@ -496,6 +507,15 @@ async function resolveConflict(f) {
   } catch (e) { toast(fmtGitErr(e), 'error'); }
 }
 
+// 复制文件到系统剪贴板（资源管理器/聊天工具可直接粘贴）
+function copyFileToClipboard(f) {
+  const abs = state.repo.path + '\\' + f.path.replace(/\//g, '\\');
+  window.gitmate.copyFile(abs).then((r) => {
+    if (r && r.ok) toast('已复制文件：' + f.path, 'success');
+    else toast('复制失败：' + ((r && r.error) || ''), 'error');
+  });
+}
+
 async function toggleCheck(f, checked) {
   try {
     if (checked) await git(['add', '--', f.path]);
@@ -509,6 +529,13 @@ async function toggleCheck(f, checked) {
 
 function fileCtxItems(f) {
   const items = [];
+  if (f.conflict) {
+    items.push({ label: '✔ 标记已解决（git add）', action: () => resolveConflict(f) });
+    items.push({ label: '📋 复制文件', action: () => copyFileToClipboard(f) });
+    items.push({ label: '在资源管理器中显示', action: () => window.gitmate.showInFolder(state.repo.path + '\\' + f.path.replace(/\//g, '\\')) });
+    return items;
+  }
+  items.push({ label: '📋 复制文件', action: () => copyFileToClipboard(f) });
   items.push({
     label: f.untracked ? '✕ 删除此新文件…' : '✕ 丢弃更改…',
     danger: true,
@@ -1399,7 +1426,7 @@ async function doPull() {
 /* ============================================================
  * 提示条（仅异常时出现，"我该怎么办"）
  * ============================================================ */
-function setBanner(text, actionLabel, handler) {
+function setBanner(text, actionLabel, handler, actionLabel2, handler2) {
   const b = $('#banner');
   if (!text) { b.classList.add('hidden'); return; }
   b.classList.remove('hidden');
@@ -1408,6 +1435,10 @@ function setBanner(text, actionLabel, handler) {
   btn.textContent = actionLabel || '';
   btn.classList.toggle('hidden', !actionLabel);
   btn.onclick = handler || null;
+  const btn2 = $('#banner-action2');
+  btn2.textContent = actionLabel2 || '';
+  btn2.classList.toggle('hidden', !actionLabel2);
+  btn2.onclick = handler2 || null;
 }
 
 async function updateBanner() {
@@ -1417,7 +1448,9 @@ async function updateBanner() {
   // 1) 合并冲突进行中
   const conflicts = s.files.filter((f) => f.conflict).length;
   if (conflicts > 0) {
-    setBanner(`你在合并冲突中，还剩 ${conflicts} 个文件没解决`, '去处理', () => switchTab('changes'));
+    setBanner(`合并冲突：还剩 ${conflicts} 个文件未解决，编辑文件后点「标记已解决」再提交`,
+      '去处理', () => switchTab('changes'),
+      '刷新', () => refresh());
     return;
   }
   // 2) 分离头指针

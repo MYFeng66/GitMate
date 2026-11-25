@@ -21,4 +21,6 @@ contextBridge.exposeInMainWorld('gitmate', {
   gitFetch: (repo, timeout) => ipcRenderer.invoke('git-fetch', { repo, timeout }),
   // 在外部终端打开目录
   openTerminal: (repoPath) => ipcRenderer.invoke('open-terminal', repoPath),
+  // 复制文件到系统剪贴板
+  copyFile: (absPath) => ipcRenderer.invoke('copy-file', absPath),
 });

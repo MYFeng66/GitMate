@@ -200,6 +200,17 @@ ipcMain.handle('term-run', (_e, { repo, cmdline, timeout }) => {
   return enqueueBash(repo, cmdline, timeout || 60000);
 });
 
+// 把文件复制到系统剪贴板（可在资源管理器/聊天窗口粘贴）
+ipcMain.handle('copy-file', (_e, absPath) => {
+  try {
+    spawn('powershell.exe', ['-NoProfile', '-Command', `Set-Clipboard -Path "${absPath}"`], {
+      windowsHide: true, timeout: 10000,
+    }).on('close', (code) => { if (code !== 0) console.error('copy-file 失败 code=' + code); });
+    return { ok: true };
+  } catch (e) { return { ok: false, error: String(e) };
+  }
+});
+
 // 在外部终端打开仓库目录（新开 cmd 窗口）
 ipcMain.handle('open-terminal', (_e, repoPath) => {
   try {
